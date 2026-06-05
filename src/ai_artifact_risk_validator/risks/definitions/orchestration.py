@@ -1,0 +1,106 @@
+"""Risk definitions for Orchestration Workflow artifacts (OW-S1 through OW-Q1).
+
+Contains 5 risks covering security, performance, and quality categories
+for orchestration workflows, pipelines, and DAG definitions.
+"""
+
+from ai_artifact_risk_validator.models.enums import (
+    ArtifactType,
+    GateAction,
+    Priority,
+    RiskCategory,
+    ScannerModule,
+    SeverityLabel,
+)
+from ai_artifact_risk_validator.models.risk import RiskDefinition
+
+RISKS: list[RiskDefinition] = [
+    # ===== Security Risks (OW-S1 to OW-S2) =====
+    RiskDefinition(
+        id="OW-S1",
+        title="Injection via Orchestration Step Inputs",
+        artifact_types=[ArtifactType.ORCHESTRATION],
+        category=RiskCategory.SECURITY,
+        severity_score=8,
+        severity_label=SeverityLabel.HIGH,
+        priority=Priority.P0,
+        gate_action=GateAction.BLOCK,
+        description="Orchestration workflow passes unvalidated data between steps, enabling injection attacks.",
+        examples=["User input flowing through pipeline without sanitization", "Step output used as command argument"],
+        mitigation=["Validate data between orchestration steps", "Implement input sanitization at step boundaries", "Use typed step interfaces"],
+        detection_mechanisms=["Data flow analysis between steps", "Injection pattern detection in step definitions"],
+        scanner_modules=[ScannerModule.INJECTION_DET],
+        owasp_refs=["LLM01:2025 Prompt Injection"],
+        cwe_refs=["CWE-74"],
+    ),
+    RiskDefinition(
+        id="OW-S2",
+        title="Excessive Orchestration Privileges",
+        artifact_types=[ArtifactType.ORCHESTRATION],
+        category=RiskCategory.SECURITY,
+        severity_score=7,
+        severity_label=SeverityLabel.HIGH,
+        priority=Priority.P1,
+        gate_action=GateAction.BLOCK,
+        description="Orchestration workflow runs with elevated privileges not required by individual steps.",
+        examples=["All steps running as admin", "Workflow service account with broad access"],
+        mitigation=["Apply per-step privilege levels", "Use minimum required permissions", "Implement step-level access control"],
+        detection_mechanisms=["Privilege level analysis per step", "Service account permission audit"],
+        scanner_modules=[ScannerModule.PERM_AUDIT],
+        owasp_refs=["LLM06:2025 Excessive Agency"],
+        cwe_refs=["CWE-250"],
+    ),
+    # ===== Performance Risks (OW-P1 to OW-P2) =====
+    RiskDefinition(
+        id="OW-P1",
+        title="Sequential Bottleneck in Orchestration",
+        artifact_types=[ArtifactType.ORCHESTRATION],
+        category=RiskCategory.PERFORMANCE,
+        severity_score=4,
+        severity_label=SeverityLabel.LOW,
+        priority=Priority.P3,
+        gate_action=GateAction.INFO,
+        description="Orchestration workflow has unnecessary sequential dependencies creating performance bottlenecks.",
+        examples=["Independent steps chained sequentially", "No parallel execution where possible"],
+        mitigation=["Identify parallelizable steps", "Implement concurrent execution", "Optimize dependency graph"],
+        detection_mechanisms=["Dependency graph analysis", "Parallelization opportunity detection"],
+        scanner_modules=[ScannerModule.COMPOSE_ANALYZE],
+        owasp_refs=[],
+        cwe_refs=[],
+    ),
+    RiskDefinition(
+        id="OW-P2",
+        title="Circular Dependency in Orchestration DAG",
+        artifact_types=[ArtifactType.ORCHESTRATION],
+        category=RiskCategory.PERFORMANCE,
+        severity_score=6,
+        severity_label=SeverityLabel.MEDIUM,
+        priority=Priority.P2,
+        gate_action=GateAction.WARN,
+        description="Orchestration workflow contains circular dependencies that could cause infinite execution.",
+        examples=["Step A depends on Step B which depends on Step A", "Retry loop without termination condition"],
+        mitigation=["Validate DAG for cycles", "Add cycle detection", "Implement maximum execution limits"],
+        detection_mechanisms=["DAG cycle detection", "Dependency graph validation"],
+        scanner_modules=[ScannerModule.COMPOSE_ANALYZE],
+        owasp_refs=[],
+        cwe_refs=[],
+    ),
+    # ===== Quality Risks (OW-Q1) =====
+    RiskDefinition(
+        id="OW-Q1",
+        title="Missing Orchestration Error Handling",
+        artifact_types=[ArtifactType.ORCHESTRATION],
+        category=RiskCategory.QUALITY,
+        severity_score=5,
+        severity_label=SeverityLabel.MEDIUM,
+        priority=Priority.P2,
+        gate_action=GateAction.WARN,
+        description="Orchestration workflow lacks error handling and recovery procedures for step failures.",
+        examples=["No retry policy for failed steps", "Missing failure notification"],
+        mitigation=["Add error handling for each step", "Implement retry policies", "Define failure notification"],
+        detection_mechanisms=["Error handling configuration check", "Recovery procedure detection"],
+        scanner_modules=[ScannerModule.QUALITY_LINT],
+        owasp_refs=[],
+        cwe_refs=[],
+    ),
+]

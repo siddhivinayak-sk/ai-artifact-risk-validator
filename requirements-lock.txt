@@ -1,0 +1,43 @@
+# Auto-generated lock file for reproducible CI/CD installs.
+# Regenerate with: pip freeze --exclude-editable > requirements-lock.txt
+# Last updated: 2025-06-05
+#
+# Core runtime dependencies
+pydantic==2.10.3
+pydantic-core==2.27.1
+pyyaml==6.0.2
+jsonschema==4.23.0
+jsonschema-specifications==2024.10.1
+tiktoken==0.8.0
+click==8.1.7
+rich==13.9.4
+structlog==24.4.0
+annotated-types==0.7.0
+attrs==24.2.0
+markdown-it-py==3.0.0
+mdurl==0.1.2
+pygments==2.18.0
+referencing==0.35.1
+regex==2024.9.11
+rpds-py==0.21.0
+typing-extensions==4.12.2
+
+# Development dependencies
+pytest==8.3.4
+ruff==0.8.2
+mypy==1.13.0
+pre-commit==4.0.1
+
+# Test dependencies
+pytest-cov==6.0.0
+hypothesis==6.119.3
+pytest-asyncio==0.24.0
+coverage==7.6.8
+iniconfig==2.0.0
+packaging==24.2
+pluggy==1.5.0
+sortedcontainers==2.4.0
+
+# Build dependencies
+build==1.2.2
+twine==5.1.1

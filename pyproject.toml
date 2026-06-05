@@ -1,0 +1,205 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ai-artifact-risk-validator"
+version = "0.1.0"
+description = "Validates AI artifacts for security, performance, quality, compliance, and operational risks"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [
+    { name = "AI Artifact Validator Team" },
+]
+keywords = ["ai", "validation", "security", "risk", "artifact"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Security",
+    "Topic :: Software Development :: Quality Assurance",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "pydantic>=2.0,<3.0",
+    "pyyaml>=6.0",
+    "jsonschema>=4.17",
+    "tiktoken>=0.5",
+    "click>=8.0",
+    "rich>=13.0",
+    "structlog>=23.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0",
+    "pre-commit>=3.0",
+]
+test = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "hypothesis>=6.0",
+    "pytest-asyncio>=0.21",
+]
+ml = [
+    "transformers>=4.30",
+    "sentence-transformers>=2.2",
+    "torch>=2.0",
+    "spacy>=3.5",
+]
+secrets = [
+    "detect-secrets>=1.4",
+    "presidio-analyzer>=2.2",
+]
+security = [
+    "bandit>=1.7",
+    "pip-audit>=2.6",
+    "safety>=2.3",
+]
+provenance = [
+    "gitpython>=3.1",
+    "cryptography>=41.0",
+]
+quality = [
+    "nltk>=3.8",
+    "networkx>=3.0",
+]
+all = [
+    "ai-artifact-risk-validator[ml]",
+    "ai-artifact-risk-validator[secrets]",
+    "ai-artifact-risk-validator[security]",
+    "ai-artifact-risk-validator[provenance]",
+    "ai-artifact-risk-validator[quality]",
+]
+
+[project.scripts]
+ai-artifact-validator = "ai_artifact_risk_validator.cli.main:cli"
+
+[project.entry-points."ai_artifact_validator.scanners"]
+
+[project.urls]
+Homepage = "https://github.com/ai-artifact-validator/ai-artifact-risk-validator"
+Documentation = "https://github.com/ai-artifact-validator/ai-artifact-risk-validator#readme"
+Repository = "https://github.com/ai-artifact-validator/ai-artifact-risk-validator"
+Issues = "https://github.com/ai-artifact-validator/ai-artifact-risk-validator/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ai_artifact_risk_validator"]
+
+# --- Ruff Configuration ---
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "N",     # pep8-naming
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "A",     # flake8-builtins
+    "C4",    # flake8-comprehensions
+    "DTZ",   # flake8-datetimez
+    "T20",   # flake8-print
+    "SIM",   # flake8-simplify
+    "TCH",   # flake8-type-checking
+    "RUF",   # ruff-specific rules
+    "S",     # flake8-bandit (security)
+    "ANN",   # flake8-annotations
+]
+ignore = [
+    "ANN101",  # missing type annotation for self
+    "ANN102",  # missing type annotation for cls
+    "ANN401",  # dynamically typed expressions (Any) are disallowed
+    "S101",    # use of assert (needed in tests)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101", "ANN", "T20"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint.isort]
+known-first-party = ["ai_artifact_risk_validator"]
+
+# --- Mypy Configuration ---
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_any_generics = true
+no_implicit_optional = true
+no_implicit_reexport = true
+show_error_codes = true
+show_column_numbers = true
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = [
+    "tiktoken.*",
+    "detect_secrets.*",
+    "presidio_analyzer.*",
+    "transformers.*",
+    "sentence_transformers.*",
+    "torch.*",
+    "spacy.*",
+    "nltk.*",
+    "networkx.*",
+    "git.*",
+    "bandit.*",
+    "pip_audit.*",
+    "safety.*",
+]
+ignore_missing_imports = true
+
+# --- Pytest Configuration ---
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "--strict-markers -v"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks integration tests",
+]
+
+# --- Coverage Configuration ---
+[tool.coverage.run]
+source = ["src/ai_artifact_risk_validator"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.",
+    "raise NotImplementedError",
+    "@abstractmethod",
+]
