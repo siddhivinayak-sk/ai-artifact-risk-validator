@@ -6,8 +6,6 @@ import tempfile
 import time
 from pathlib import Path
 
-import pytest
-
 from ai_artifact_risk_validator.classifiers import ArtifactClassifier
 from ai_artifact_risk_validator.models import (
     ArtifactType,
@@ -23,7 +21,6 @@ from ai_artifact_risk_validator.models import (
 from ai_artifact_risk_validator.pipeline.executor import PipelineExecutor
 from ai_artifact_risk_validator.scanners.base import BaseScanner
 from ai_artifact_risk_validator.scanners.registry import ScannerRegistry
-
 
 # --- Fake scanner implementations for testing ---
 
@@ -191,7 +188,11 @@ class EmptyScanner(BaseScanner):
 # --- Helper functions ---
 
 
-def _create_prompt_file(directory: Path, name: str = "test.prompt.md", content: str = "## System Prompt\nYou are a helpful assistant.\n") -> Path:
+def _create_prompt_file(
+    directory: Path,
+    name: str = "test.prompt.md",
+    content: str = "## System Prompt\nYou are a helpful assistant.\n",
+) -> Path:
     """Create a prompt file that will be classified as ArtifactType.PROMPT."""
     file_path = directory / name
     file_path.write_text(content, encoding="utf-8")

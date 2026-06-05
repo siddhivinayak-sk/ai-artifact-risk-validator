@@ -13,7 +13,6 @@ from rich.text import Text
 from ai_artifact_risk_validator.models.enums import GateAction, SeverityLabel
 from ai_artifact_risk_validator.models.report import ScanReport
 
-
 _GATE_STYLE = {
     GateAction.BLOCK: "bold red",
     GateAction.WARN: "bold yellow",

@@ -12,6 +12,7 @@ from __future__ import annotations
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
+from ai_artifact_risk_validator._internal.suppression import apply_config_suppressions
 from ai_artifact_risk_validator.models.config import SuppressionRule
 from ai_artifact_risk_validator.models.enums import (
     ArtifactType,
@@ -22,9 +23,7 @@ from ai_artifact_risk_validator.models.enums import (
     SeverityLabel,
 )
 from ai_artifact_risk_validator.models.findings import FindingLocation, ScanFinding
-from ai_artifact_risk_validator._internal.suppression import apply_config_suppressions
 from ai_artifact_risk_validator.pipeline.aggregator import Aggregator
-
 
 # --- Strategies ---
 
@@ -81,8 +80,10 @@ def finding_strategy(
 ) -> ScanFinding:
     """Generate a ScanFinding with optional fixed risk_id and artifact_path."""
     rid = risk_id if risk_id is not None else draw(st.sampled_from(_RISK_IDS))
-    path = artifact_path if artifact_path is not None else draw(
-        st.sampled_from(_NON_MATCHING_PATHS + ["prompts/test.md", "src/main.py"])
+    path = (
+        artifact_path
+        if artifact_path is not None
+        else draw(st.sampled_from(_NON_MATCHING_PATHS + ["prompts/test.md", "src/main.py"]))
     )
     severity_score = draw(st.integers(min_value=1, max_value=10))
     confidence = draw(st.floats(min_value=0.0, max_value=1.0, allow_nan=False))
@@ -184,9 +185,7 @@ class TestSuppressionRuleApplication:
 
     @given(data=st.data())
     @settings(max_examples=200)
-    def test_non_matching_finding_not_marked_false_positive(
-        self, data: st.DataObject
-    ) -> None:
+    def test_non_matching_finding_not_marked_false_positive(self, data: st.DataObject) -> None:
         """Findings that do NOT match any suppression rule retain false_positive=False."""
         finding, rule = data.draw(non_matching_finding_and_rule_strategy())
 
@@ -197,9 +196,7 @@ class TestSuppressionRuleApplication:
 
     @given(data=st.data())
     @settings(max_examples=200)
-    def test_rule_with_no_file_pattern_matches_all_paths(
-        self, data: st.DataObject
-    ) -> None:
+    def test_rule_with_no_file_pattern_matches_all_paths(self, data: st.DataObject) -> None:
         """A suppression rule with file_pattern=None matches any finding with
         the same risk_id, regardless of artifact_path."""
         risk_id = data.draw(st.sampled_from(_RISK_IDS))
@@ -216,9 +213,7 @@ class TestSuppressionRuleApplication:
 
     @given(data=st.data())
     @settings(max_examples=200)
-    def test_suppression_preserves_finding_data(
-        self, data: st.DataObject
-    ) -> None:
+    def test_suppression_preserves_finding_data(self, data: st.DataObject) -> None:
         """Suppression only changes false_positive; all other fields remain unchanged."""
         finding, rule = data.draw(matching_finding_and_rule_strategy())
 
@@ -262,8 +257,7 @@ class TestSuppressionRuleApplication:
             should_be_suppressed = any(
                 original.id == rule.risk_id
                 and (
-                    rule.file_pattern is None
-                    or fnmatch(original.artifact_path, rule.file_pattern)
+                    rule.file_pattern is None or fnmatch(original.artifact_path, rule.file_pattern)
                 )
                 for rule in rules
             )

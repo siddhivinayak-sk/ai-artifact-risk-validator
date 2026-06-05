@@ -10,10 +10,10 @@ of range, id pattern mismatch).
 
 import string
 
+import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
-import pytest
 
 from ai_artifact_risk_validator.models import (
     ArtifactType,
@@ -25,7 +25,6 @@ from ai_artifact_risk_validator.models import (
     ScannerModule,
     SeverityLabel,
 )
-
 
 # --- Strategies for valid data ---
 
@@ -82,21 +81,25 @@ invalid_severity_too_low_strategy = st.integers(max_value=0)
 
 invalid_severity_too_high_strategy = st.integers(min_value=11)
 
-invalid_confidence_too_low_strategy = st.floats(max_value=-0.01, allow_nan=False, allow_infinity=False)
+invalid_confidence_too_low_strategy = st.floats(
+    max_value=-0.01, allow_nan=False, allow_infinity=False
+)
 
-invalid_confidence_too_high_strategy = st.floats(min_value=1.01, allow_nan=False, allow_infinity=False)
+invalid_confidence_too_high_strategy = st.floats(
+    min_value=1.01, allow_nan=False, allow_infinity=False
+)
 
 # IDs that do NOT match the pattern ^[A-Z]+-[A-Z]?[0-9]+$
 invalid_id_strategy = st.one_of(
-    st.just(""),                           # empty string
-    st.just("lowercase-1"),                # lowercase letters
-    st.just("123-456"),                    # starts with digits
-    st.just("ABC"),                        # no hyphen or digits
-    st.just("A-"),                         # no digits after hyphen
-    st.just("A-BC"),                       # no digits, two letters after hyphen
-    st.just("a-1"),                        # lowercase prefix
-    st.just("-A1"),                        # starts with hyphen
-    st.just("AB-CD-1"),                    # multiple hyphens
+    st.just(""),  # empty string
+    st.just("lowercase-1"),  # lowercase letters
+    st.just("123-456"),  # starts with digits
+    st.just("ABC"),  # no hyphen or digits
+    st.just("A-"),  # no digits after hyphen
+    st.just("A-BC"),  # no digits, two letters after hyphen
+    st.just("a-1"),  # lowercase prefix
+    st.just("-A1"),  # starts with hyphen
+    st.just("AB-CD-1"),  # multiple hyphens
     st.text(
         alphabet=string.ascii_lowercase + string.digits + " !@#",
         min_size=1,

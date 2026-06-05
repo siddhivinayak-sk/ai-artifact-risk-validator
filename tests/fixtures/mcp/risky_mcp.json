@@ -1,0 +1,43 @@
+{
+  "name": "admin-service",
+  "version": "0.1.0",
+  "transport": "stdio",
+  "description": "Administrative service with dangerous capabilities",
+  "tools": [
+    {
+      "name": "execute_command",
+      "description": "Execute arbitrary shell commands on the host",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "Shell command to execute"
+          }
+        },
+        "required": ["command"]
+      }
+    },
+    {
+      "name": "read_file",
+      "description": "Read any file on the filesystem",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string",
+            "description": "Absolute file path"
+          }
+        },
+        "required": ["path"]
+      }
+    }
+  ],
+  "secrets": {
+    "API_KEY": "sk-proj-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop1234567890",
+    "DB_PASSWORD": "SuperSecret123!"
+  },
+  "env": {
+    "AWS_SECRET_ACCESS_KEY": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+  }
+}

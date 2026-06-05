@@ -70,9 +70,7 @@ def parse_inline_suppressions(content: str) -> dict[int, list[str]]:
     return suppressions
 
 
-def apply_inline_suppressions(
-    findings: list[ScanFinding], content: str
-) -> list[ScanFinding]:
+def apply_inline_suppressions(findings: list[ScanFinding], content: str) -> list[ScanFinding]:
     """Apply inline suppression comments to findings.
 
     Parses inline suppressions from content and marks matching findings
@@ -147,9 +145,7 @@ def clear_suppressions(findings: list[ScanFinding]) -> list[ScanFinding]:
         List of findings with all false_positive flags set to False.
     """
     return [
-        finding.model_copy(update={"false_positive": False})
-        if finding.false_positive
-        else finding
+        finding.model_copy(update={"false_positive": False}) if finding.false_positive else finding
         for finding in findings
     ]
 

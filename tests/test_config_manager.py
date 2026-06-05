@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -109,9 +108,7 @@ class TestConfigFileLoading:
         explicit_file = explicit_dir / "custom.yaml"
         explicit_file.write_text(yaml.dump(explicit_config), encoding="utf-8")
 
-        config = config_manager.load(
-            config_path=str(explicit_file), scan_path=str(tmp_config_dir)
-        )
+        config = config_manager.load(config_path=str(explicit_file), scan_path=str(tmp_config_dir))
         assert config.severity_threshold == 9
 
     def test_invalid_yaml_returns_defaults(self, config_manager, tmp_config_dir):
@@ -266,9 +263,7 @@ class TestCLIOverrides:
             config = config_manager.load(cli_overrides={"log_level": "CRITICAL"})
         assert config.log_level == "CRITICAL"
 
-    def test_cli_overrides_take_precedence_over_config_file(
-        self, config_manager, tmp_config_dir
-    ):
+    def test_cli_overrides_take_precedence_over_config_file(self, config_manager, tmp_config_dir):
         config_data = {"severity": {"threshold": 3}}
         config_file = tmp_config_dir / ".aav.yaml"
         config_file.write_text(yaml.dump(config_data), encoding="utf-8")
@@ -279,9 +274,7 @@ class TestCLIOverrides:
         assert config.severity_threshold == 10
 
     def test_none_cli_overrides_are_filtered(self, config_manager):
-        config = config_manager.load(
-            cli_overrides={"log_level": "ERROR", "cache_dir": None}
-        )
+        config = config_manager.load(cli_overrides={"log_level": "ERROR", "cache_dir": None})
         assert config.log_level == "ERROR"
         assert config.cache_dir is None  # Default, not overridden
 

@@ -14,7 +14,6 @@ from ai_artifact_risk_validator.models import (
 from ai_artifact_risk_validator.scanners.base import BaseScanner
 from ai_artifact_risk_validator.scanners.registry import ScannerRegistry
 
-
 # --- Test scanner implementations ---
 
 
@@ -177,9 +176,7 @@ class TestEnabledDisabledConfig:
     """Tests for enabled/disabled scanner configuration."""
 
     def test_disabled_scanners_excluded(self):
-        config = ValidatorConfig(
-            disabled_scanners=[ScannerModule.SECRET_SCAN]
-        )
+        config = ValidatorConfig(disabled_scanners=[ScannerModule.SECRET_SCAN])
         registry = ScannerRegistry(config=config)
         registry.register(FakeSecretScanner)
         registry.register(FakeQualityScanner)
@@ -189,9 +186,7 @@ class TestEnabledDisabledConfig:
         assert scanners[0].name == ScannerModule.QUALITY_LINT
 
     def test_enabled_scanners_whitelist(self):
-        config = ValidatorConfig(
-            enabled_scanners=[ScannerModule.SECRET_SCAN]
-        )
+        config = ValidatorConfig(enabled_scanners=[ScannerModule.SECRET_SCAN])
         registry = ScannerRegistry(config=config)
         registry.register(FakeSecretScanner)
         registry.register(FakeQualityScanner)
@@ -243,7 +238,7 @@ class TestPluginDirectoryDiscovery:
     """Tests for plugin directory discovery."""
 
     def test_loads_scanner_from_plugin_file(self):
-        plugin_code = '''
+        plugin_code = """
 from ai_artifact_risk_validator.models import ArtifactType, ScanFinding, ScannerModule
 from ai_artifact_risk_validator.scanners.base import BaseScanner
 
@@ -263,7 +258,7 @@ class MyPluginScanner(BaseScanner):
 
     def scan(self, artifact_content, artifact_type, artifact_path):
         return []
-'''
+"""
         with tempfile.TemporaryDirectory() as tmpdir:
             plugin_file = Path(tmpdir) / "my_scanner.py"
             plugin_file.write_text(plugin_code)

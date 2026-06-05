@@ -6,8 +6,6 @@ config-based suppression matching, and the --no-ignore override behavior.
 
 from datetime import datetime
 
-import pytest
-
 from ai_artifact_risk_validator._internal.suppression import (
     apply_config_suppressions,
     apply_inline_suppressions,

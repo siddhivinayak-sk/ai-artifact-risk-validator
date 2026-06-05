@@ -5,7 +5,6 @@ individual risk detections produced by scanner modules.
 """
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -22,10 +21,10 @@ from ai_artifact_risk_validator.models.enums import (
 class FindingLocation(BaseModel):
     """Specifies where in a file a finding was detected."""
 
-    line: Optional[int] = None
-    end_line: Optional[int] = None
-    section: Optional[str] = None
-    offset: Optional[int] = None
+    line: int | None = None
+    end_line: int | None = None
+    section: str | None = None
+    offset: int | None = None
 
 
 class ScanFinding(BaseModel):

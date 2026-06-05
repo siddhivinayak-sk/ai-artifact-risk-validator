@@ -3,7 +3,10 @@
 __version__ = "0.1.0"
 
 
-def __getattr__(name: str):
+from typing import Any
+
+
+def __getattr__(name: str) -> Any:
     """Lazy import for Validator to avoid circular imports during package setup."""
     if name == "Validator":
         from ai_artifact_risk_validator.validator import Validator
@@ -12,4 +15,4 @@ def __getattr__(name: str):
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
-__all__ = ["__version__", "Validator"]
+__all__ = ["Validator", "__version__"]

@@ -67,9 +67,7 @@ class ArtifactClassifier:
                     # Skip unknown artifact type names gracefully
                     pass
 
-    def classify(
-        self, file_path: Path, content: str | None = None
-    ) -> ClassificationResult | None:
+    def classify(self, file_path: Path, content: str | None = None) -> ClassificationResult | None:
         """Classify a file into an artifact type.
 
         Args:
@@ -94,9 +92,7 @@ class ArtifactClassifier:
         best_signals: list[str] = []
 
         for artifact_type in ArtifactType:
-            score, signals = self._compute_score(
-                artifact_type, file_path, normalized_path, content
-            )
+            score, signals = self._compute_score(artifact_type, file_path, normalized_path, content)
             if score > best_score:
                 best_score = score
                 best_type = artifact_type
@@ -201,9 +197,7 @@ class ArtifactClassifier:
 
         return False
 
-    def _check_directory_context(
-        self, artifact_type: ArtifactType, file_path: Path
-    ) -> bool:
+    def _check_directory_context(self, artifact_type: ArtifactType, file_path: Path) -> bool:
         """Check directory context signals for the artifact type.
 
         Checks both the parent directory name and sibling filenames against

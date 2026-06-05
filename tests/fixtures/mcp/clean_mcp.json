@@ -1,0 +1,22 @@
+{
+  "name": "weather-service",
+  "version": "1.0.0",
+  "transport": "stdio",
+  "description": "A simple weather lookup service",
+  "tools": [
+    {
+      "name": "get_weather",
+      "description": "Get current weather for a city",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "city": {
+            "type": "string",
+            "description": "City name"
+          }
+        },
+        "required": ["city"]
+      }
+    }
+  ]
+}

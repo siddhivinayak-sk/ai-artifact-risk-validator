@@ -1,9 +1,6 @@
 """Unit tests for content hashing and scan result caching."""
 
-import json
 from pathlib import Path
-
-import pytest
 
 from ai_artifact_risk_validator._internal.cache import ScanCache
 from ai_artifact_risk_validator._internal.hashing import compute_cache_key, compute_content_hash

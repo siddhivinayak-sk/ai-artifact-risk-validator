@@ -11,9 +11,6 @@ Tests cover:
 
 from __future__ import annotations
 
-import tempfile
-from pathlib import Path
-
 import pytest
 
 from ai_artifact_risk_validator.models.config import ValidatorConfig
@@ -65,7 +62,9 @@ class TestVerifyNonExistentPath:
         v = Validator()
         report = v.verify("/nonexistent/path/abc123xyz")
         assert len(report.errors) == 1
-        assert "does not exist" in report.errors[0].lower() or "not exist" in report.errors[0].lower()
+        assert (
+            "does not exist" in report.errors[0].lower() or "not exist" in report.errors[0].lower()
+        )
 
     def test_nonexistent_path_gate_decision_is_info(self):
         """verify() with non-existent path returns INFO gate decision."""

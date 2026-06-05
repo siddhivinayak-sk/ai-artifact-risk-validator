@@ -21,7 +21,6 @@ from ai_artifact_risk_validator.models.enums import (
 from ai_artifact_risk_validator.models.risk import RiskDefinition
 from ai_artifact_risk_validator.risks import RiskRegistry
 
-
 # Load the registry once for all tests
 _registry = RiskRegistry()
 _all_risks: list[RiskDefinition] = list(_registry.query())
@@ -43,9 +42,7 @@ class TestRiskRegistryCompleteness:
         """**Validates: Requirements 11.1, 11.2**"""
         ids = [r.id for r in _all_risks]
         duplicates = [rid for rid in ids if ids.count(rid) > 1]
-        assert len(ids) == len(set(ids)), (
-            f"Duplicate risk IDs found: {sorted(set(duplicates))}"
-        )
+        assert len(ids) == len(set(ids)), f"Duplicate risk IDs found: {sorted(set(duplicates))}"
 
 
 class TestRiskRegistrySeverityScoreValidity:
@@ -59,8 +56,7 @@ class TestRiskRegistrySeverityScoreValidity:
     def test_severity_score_in_valid_range(self, risk: RiskDefinition):
         """**Validates: Requirements 11.1, 11.2**"""
         assert 1 <= risk.severity_score <= 10, (
-            f"Risk {risk.id} has invalid severity_score={risk.severity_score}, "
-            f"expected 1-10"
+            f"Risk {risk.id} has invalid severity_score={risk.severity_score}, expected 1-10"
         )
 
 
@@ -104,9 +100,7 @@ class TestRiskRegistryScannerModuleAssignment:
     )
     def test_has_at_least_one_scanner_module(self, risk: RiskDefinition):
         """**Validates: Requirements 11.3**"""
-        assert len(risk.scanner_modules) >= 1, (
-            f"Risk {risk.id} has no scanner_modules assigned"
-        )
+        assert len(risk.scanner_modules) >= 1, f"Risk {risk.id} has no scanner_modules assigned"
 
 
 class TestRiskRegistryArtifactTypeAssignment:
@@ -119,9 +113,7 @@ class TestRiskRegistryArtifactTypeAssignment:
     )
     def test_has_at_least_one_artifact_type(self, risk: RiskDefinition):
         """**Validates: Requirements 11.1, 11.2**"""
-        assert len(risk.artifact_types) >= 1, (
-            f"Risk {risk.id} has no artifact_types assigned"
-        )
+        assert len(risk.artifact_types) >= 1, f"Risk {risk.id} has no artifact_types assigned"
 
 
 class TestRiskRegistryGateActionConsistency:

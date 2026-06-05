@@ -246,7 +246,7 @@ class TestHtmlFormatter:
             priority=Priority.P0,
             gate_action=GateAction.BLOCK,
             category=RiskCategory.SECURITY,
-            title="Test <b>bold</b> & \"quotes\"",
+            title='Test <b>bold</b> & "quotes"',
             description="Test description",
             location=FindingLocation(line=1),
             evidence="test evidence",

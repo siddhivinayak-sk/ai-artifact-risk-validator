@@ -149,9 +149,7 @@ class TestRiskRegistryQuery:
 
     def test_query_multiple_filters_are_anded(self):
         reg = RiskRegistry()
-        results = reg.query(
-            artifact_type=ArtifactType.PROMPT, category=RiskCategory.SECURITY
-        )
+        results = reg.query(artifact_type=ArtifactType.PROMPT, category=RiskCategory.SECURITY)
         assert len(results) > 0
         for r in results:
             assert ArtifactType.PROMPT in r.artifact_types
@@ -168,8 +166,11 @@ class TestRiskRegistryQuery:
     def test_query_custom_risk_included_in_results(self):
         reg = RiskRegistry()
         reg.add_custom(
-            _make_risk("ZCUSTOM-Q1", category=RiskCategory.PERFORMANCE,
-                       artifact_types=[ArtifactType.EVAL_HARNESS])
+            _make_risk(
+                "ZCUSTOM-Q1",
+                category=RiskCategory.PERFORMANCE,
+                artifact_types=[ArtifactType.EVAL_HARNESS],
+            )
         )
         results = reg.query(
             artifact_type=ArtifactType.EVAL_HARNESS, category=RiskCategory.PERFORMANCE
@@ -253,7 +254,9 @@ class TestLoadAllRisks:
     def test_all_risks_have_unique_ids(self):
         risks = load_all_risks()
         ids = [r.id for r in risks]
-        assert len(ids) == len(set(ids)), f"Duplicate IDs found: {[x for x in ids if ids.count(x) > 1]}"
+        assert len(ids) == len(set(ids)), (
+            f"Duplicate IDs found: {[x for x in ids if ids.count(x) > 1]}"
+        )
 
     def test_all_risks_are_risk_definition_instances(self):
         risks = load_all_risks()

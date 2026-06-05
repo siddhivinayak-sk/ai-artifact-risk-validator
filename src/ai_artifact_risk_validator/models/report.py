@@ -5,7 +5,6 @@ the complete output of a validation run.
 """
 
 from datetime import datetime
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -38,7 +37,7 @@ class ScanReport(BaseModel):
 
     scan_id: str
     artifact_path: str
-    artifact_type: Optional[ArtifactType] = None  # None for directory scans
+    artifact_type: ArtifactType | None = None  # None for directory scans
     scan_timestamp: datetime
     scanner_version: str
     findings: list[ScanFinding]

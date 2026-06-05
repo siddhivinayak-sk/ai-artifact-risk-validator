@@ -52,9 +52,7 @@ class ScannerRegistry:
             TypeError: If scanner_class is not a subclass of BaseScanner.
         """
         if not (isinstance(scanner_class, type) and issubclass(scanner_class, BaseScanner)):
-            raise TypeError(
-                f"Expected a subclass of BaseScanner, got {scanner_class!r}"
-            )
+            raise TypeError(f"Expected a subclass of BaseScanner, got {scanner_class!r}")
 
         # We need to get the name from the class. Since `name` is an abstract property,
         # we instantiate temporarily only to read the name, but to support lazy loading
@@ -162,9 +160,7 @@ class ScannerRegistry:
                     error=str(exc),
                 )
 
-    def get_scanners_for_artifact(
-        self, artifact_type: ArtifactType
-    ) -> list[BaseScanner]:
+    def get_scanners_for_artifact(self, artifact_type: ArtifactType) -> list[BaseScanner]:
         """Return scanner instances applicable to the given artifact type.
 
         Filters scanners based on:

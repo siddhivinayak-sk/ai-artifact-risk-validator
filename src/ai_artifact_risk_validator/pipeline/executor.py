@@ -17,6 +17,7 @@ from pathlib import Path
 from ai_artifact_risk_validator._internal.logging import get_logger
 from ai_artifact_risk_validator.classifiers import ArtifactClassifier
 from ai_artifact_risk_validator.models import ScanFinding, ValidatorConfig
+from ai_artifact_risk_validator.models.enums import ArtifactType
 from ai_artifact_risk_validator.scanners.base import BaseScanner
 from ai_artifact_risk_validator.scanners.registry import ScannerRegistry
 
@@ -141,7 +142,7 @@ class PipelineExecutor:
         self,
         scanners: list[BaseScanner],
         content: str,
-        artifact_type: "ArtifactType",
+        artifact_type: ArtifactType,
         file_path: Path,
     ) -> list[ScanFinding]:
         """Run all applicable scanners in parallel for a single file.
@@ -159,7 +160,6 @@ class PipelineExecutor:
         Returns:
             Combined list of findings from all scanners.
         """
-        from ai_artifact_risk_validator.models.enums import ArtifactType
 
         findings: list[ScanFinding] = []
         artifact_path_str = str(file_path)
@@ -203,7 +203,7 @@ class PipelineExecutor:
     def _invoke_scanner(
         scanner: BaseScanner,
         content: str,
-        artifact_type: "ArtifactType",
+        artifact_type: ArtifactType,
         artifact_path: str,
     ) -> list[ScanFinding]:
         """Invoke a single scanner's scan method.

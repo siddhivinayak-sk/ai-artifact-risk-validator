@@ -2,8 +2,6 @@
 
 from datetime import datetime
 
-import pytest
-
 from ai_artifact_risk_validator.models.config import SuppressionRule
 from ai_artifact_risk_validator.models.enums import (
     ArtifactType,
@@ -176,7 +174,7 @@ class TestAggregatorSuppression:
         """Test glob-style wildcard patterns via fnmatch."""
         aggregator = Aggregator()
         finding = _make_finding(risk_id="P-S1", artifact_path="src/prompts/deep/nested/file.md")
-        rule = SuppressionRule(risk_id="P-S1", file_pattern="src/prompts/**/file.md")
+        _rule_no_match = SuppressionRule(risk_id="P-S1", file_pattern="src/prompts/**/file.md")
         # fnmatch doesn't support **, so this won't match with fnmatch
         # Use a simpler glob pattern
         rule2 = SuppressionRule(risk_id="P-S1", file_pattern="*file.md")

@@ -7,12 +7,12 @@ content hash, enabling unchanged files to skip re-scanning.
 from __future__ import annotations
 
 import json
-import logging
 from pathlib import Path
 
+from ai_artifact_risk_validator._internal.logging import get_logger
 from ai_artifact_risk_validator.models.findings import ScanFinding
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 class ScanCache:
@@ -63,11 +63,11 @@ class ScanCache:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             if not isinstance(data, list):
-                logger.warning("Cache entry %s is not a list, treating as miss", cache_key)
+                logger.warning("Cache entry is not a list, treating as miss", cache_key=cache_key)
                 return None
             return [ScanFinding.model_validate(item) for item in data]
         except (json.JSONDecodeError, OSError, ValueError, TypeError) as exc:
-            logger.warning("Failed to read cache entry %s: %s", cache_key, exc)
+            logger.warning("Failed to read cache entry", cache_key=cache_key, error=str(exc))
             return None
 
     def put(self, cache_key: str, findings: list[ScanFinding]) -> None:
@@ -88,7 +88,7 @@ class ScanCache:
             data = [finding.model_dump(mode="json") for finding in findings]
             path.write_text(json.dumps(data, default=str), encoding="utf-8")
         except OSError as exc:
-            logger.warning("Failed to write cache entry %s: %s", cache_key, exc)
+            logger.warning("Failed to write cache entry", cache_key=cache_key, error=str(exc))
 
     def invalidate(self, cache_key: str) -> None:
         """Remove a specific cache entry.
@@ -104,7 +104,7 @@ class ScanCache:
             if path.exists():
                 path.unlink()
         except OSError as exc:
-            logger.warning("Failed to invalidate cache entry %s: %s", cache_key, exc)
+            logger.warning("Failed to invalidate cache entry", cache_key=cache_key, error=str(exc))
 
     def clear(self) -> None:
         """Remove all cache entries.
@@ -119,4 +119,4 @@ class ScanCache:
                 for cache_file in self._cache_dir.glob("*.json"):
                     cache_file.unlink()
         except OSError as exc:
-            logger.warning("Failed to clear cache: %s", exc)
+            logger.warning("Failed to clear cache", error=str(exc))

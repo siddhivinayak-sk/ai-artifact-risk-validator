@@ -134,9 +134,7 @@ class FileDiscovery:
 
         # Check include patterns (empty means include all)
         if self._include_patterns:
-            if not self._matches_any_pattern(
-                name, relative_str, self._include_patterns
-            ):
+            if not self._matches_any_pattern(name, relative_str, self._include_patterns):
                 logger.debug("File not matched by include patterns", artifact_path=str(file_path))
                 return False
 
@@ -165,9 +163,7 @@ class FileDiscovery:
 
         return True
 
-    def _matches_any_pattern(
-        self, filename: str, full_path: str, patterns: list[str]
-    ) -> bool:
+    def _matches_any_pattern(self, filename: str, full_path: str, patterns: list[str]) -> bool:
         """Check if a file matches any of the given glob patterns.
 
         Matches against both the filename alone and the full path string

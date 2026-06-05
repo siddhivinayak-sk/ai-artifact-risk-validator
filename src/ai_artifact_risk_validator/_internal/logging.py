@@ -40,7 +40,7 @@ def configure_logging(
     # Map string level to numeric for stdlib logging
     numeric_level = getattr(logging, log_level.upper(), logging.INFO)
 
-    # Configure the standard library root logger for the package
+    # Configure the standard library logger for the package
     # This ensures structlog-wrapped loggers respect the level threshold
     package_logger = logging.getLogger("ai_artifact_risk_validator")
     package_logger.setLevel(numeric_level)
@@ -48,21 +48,13 @@ def configure_logging(
     # Remove existing handlers to avoid duplicate output on re-configuration
     package_logger.handlers.clear()
 
-    # Add a stream handler for output
-    handler = logging.StreamHandler(sys.stderr)
-    handler.setLevel(numeric_level)
-    package_logger.addHandler(handler)
-
-    # Prevent propagation to root logger to avoid duplicate messages
-    package_logger.propagate = False
-
     # Choose the renderer based on configuration
     if json_output:
         renderer: structlog.types.Processor = structlog.processors.JSONRenderer()
     else:
         renderer = structlog.dev.ConsoleRenderer()
 
-    # Shared processors for both structlog and stdlib integration
+    # Shared processors applied to all log entries
     shared_processors: list[structlog.types.Processor] = [
         structlog.contextvars.merge_contextvars,
         structlog.stdlib.add_log_level,
@@ -73,24 +65,24 @@ def configure_logging(
         structlog.processors.UnicodeDecoder(),
     ]
 
-    # Configure structlog
+    # Configure structlog to use stdlib integration
+    # The processor chain here runs before handing off to the stdlib logger.
+    # filter_by_level ensures messages below the configured level are dropped.
     structlog.configure(
         processors=[
             *shared_processors,
             structlog.stdlib.filter_by_level,
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
-            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-            renderer,
         ],
         wrapper_class=structlog.stdlib.BoundLogger,
         context_class=dict,
         logger_factory=structlog.stdlib.LoggerFactory(),
-        cache_logger_on_first_use=True,
+        cache_logger_on_first_use=False,
     )
 
-    # Also configure a ProcessorFormatter for the stdlib handler
-    # so that stdlib loggers used elsewhere in the package get
-    # structured output too
+    # Create a ProcessorFormatter that renders the final output
+    # This formatter handles structlog events that have been wrapped
+    # as well as foreign (plain stdlib) log records.
     formatter = structlog.stdlib.ProcessorFormatter(
         processors=[
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
@@ -98,7 +90,15 @@ def configure_logging(
         ],
         foreign_pre_chain=shared_processors,
     )
+
+    # Add a stream handler with the ProcessorFormatter for output
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setLevel(numeric_level)
     handler.setFormatter(formatter)
+    package_logger.addHandler(handler)
+
+    # Prevent propagation to root logger to avoid duplicate messages
+    package_logger.propagate = False
 
 
 def get_logger(name: str | None = None, **initial_context: Any) -> structlog.stdlib.BoundLogger:

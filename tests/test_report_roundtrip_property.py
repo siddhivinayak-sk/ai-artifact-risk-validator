@@ -29,7 +29,6 @@ from ai_artifact_risk_validator.models import (
 from ai_artifact_risk_validator.reporting.parser import ReportParser
 from ai_artifact_risk_validator.reporting.serializer import ReportSerializer
 
-
 # --- Strategies for generating valid components ---
 
 valid_id_strategy = st.from_regex(r"^[A-Z]+-[A-Z]?[0-9]+$", fullmatch=True)
@@ -124,12 +123,8 @@ def valid_scan_summary(draw: st.DrawFn, findings: list[ScanFinding]) -> ScanSumm
     blocking = sum(
         1 for f in findings if f.gate_action == GateAction.BLOCK and not f.false_positive
     )
-    warning = sum(
-        1 for f in findings if f.gate_action == GateAction.WARN and not f.false_positive
-    )
-    info = sum(
-        1 for f in findings if f.gate_action == GateAction.INFO and not f.false_positive
-    )
+    warning = sum(1 for f in findings if f.gate_action == GateAction.WARN and not f.false_positive)
+    info = sum(1 for f in findings if f.gate_action == GateAction.INFO and not f.false_positive)
 
     # Overall gate decision
     if blocking > 0:
@@ -161,9 +156,7 @@ def valid_scan_report(draw: st.DrawFn) -> ScanReport:
         artifact_path=draw(valid_non_empty_text),
         artifact_type=draw(st.one_of(st.none(), valid_artifact_type_strategy)),
         scan_timestamp=draw(valid_datetime_strategy),
-        scanner_version=draw(
-            st.from_regex(r"^[0-9]+\.[0-9]+\.[0-9]+$", fullmatch=True)
-        ),
+        scanner_version=draw(st.from_regex(r"^[0-9]+\.[0-9]+\.[0-9]+$", fullmatch=True)),
         findings=findings,
         summary=summary,
         errors=draw(st.lists(valid_non_empty_text, min_size=0, max_size=3)),
@@ -181,9 +174,7 @@ class TestReportSerializationRoundTrip:
 
     @given(report=valid_scan_report())
     @settings(max_examples=100)
-    def test_serialize_then_parse_produces_equivalent_report(
-        self, report: ScanReport
-    ) -> None:
+    def test_serialize_then_parse_produces_equivalent_report(self, report: ScanReport) -> None:
         """For all valid ScanReport r, parse(serialize(r)) == r (structurally).
 
         Serializing a ScanReport to JSON with ReportSerializer.serialize() and

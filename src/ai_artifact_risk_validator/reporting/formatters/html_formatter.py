@@ -12,7 +12,6 @@ from ai_artifact_risk_validator.models.enums import GateAction, SeverityLabel
 from ai_artifact_risk_validator.models.findings import ScanFinding
 from ai_artifact_risk_validator.models.report import ScanReport
 
-
 _GATE_COLOR = {
     GateAction.BLOCK: "#dc3545",
     GateAction.WARN: "#ffc107",
@@ -47,9 +46,7 @@ def format_html(report: ScanReport) -> str:
 
     errors_section = ""
     if report.errors:
-        error_items = "\n".join(
-            f"        <li>{html_lib.escape(e)}</li>" for e in report.errors
-        )
+        error_items = "\n".join(f"        <li>{html_lib.escape(e)}</li>" for e in report.errors)
         errors_section = f"""
     <div class="errors">
       <h2>Errors</h2>

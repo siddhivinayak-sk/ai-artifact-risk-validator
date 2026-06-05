@@ -9,17 +9,17 @@ and environment variable overrides with the AAV_ prefix.
 
 from __future__ import annotations
 
-import logging
 import os
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from ai_artifact_risk_validator._internal.logging import get_logger
 from ai_artifact_risk_validator.models.config import SuppressionRule, ValidatorConfig
 from ai_artifact_risk_validator.models.enums import GateAction, ScannerModule
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Environment variable prefix
 _ENV_PREFIX = "AAV_"
@@ -279,7 +279,8 @@ def _parse_env_vars() -> dict[str, Any]:
             except (ValueError, TypeError):
                 logger.warning(
                     "Invalid environment variable value",
-                    extra={"env_var": env_key, "value": value},
+                    env_var=env_key,
+                    value=value,
                 )
 
     # Handle AAV_DISABLED_SCANNERS (comma-separated list)
@@ -291,7 +292,7 @@ def _parse_env_vars() -> dict[str, Any]:
         except ValueError:
             logger.warning(
                 "Invalid scanner names in AAV_DISABLED_SCANNERS",
-                extra={"value": disabled_scanners_env},
+                value=disabled_scanners_env,
             )
 
     return config_kwargs
@@ -391,13 +392,14 @@ class ConfigManager:
             if not file_path.is_file():
                 logger.warning(
                     "Specified config file not found",
-                    extra={"config_path": config_path},
+                    config_path=config_path,
                 )
                 return {}
         else:
-            file_path = _find_config_file(scan_path)
-            if file_path is None:
+            found = _find_config_file(scan_path)
+            if found is None:
                 return {}
+            file_path = found
 
         # Read and parse the YAML file
         try:
@@ -406,20 +408,22 @@ class ConfigManager:
         except yaml.YAMLError as e:
             logger.error(
                 "Failed to parse config file",
-                extra={"config_path": str(file_path), "error": str(e)},
+                config_path=str(file_path),
+                error=str(e),
             )
             return {}
         except OSError as e:
             logger.error(
                 "Failed to read config file",
-                extra={"config_path": str(file_path), "error": str(e)},
+                config_path=str(file_path),
+                error=str(e),
             )
             return {}
 
         if not isinstance(data, dict):
             logger.error(
                 "Config file must contain a YAML mapping",
-                extra={"config_path": str(file_path)},
+                config_path=str(file_path),
             )
             return {}
 
@@ -439,7 +443,8 @@ class ConfigManager:
             for error in validation_errors:
                 logger.error(
                     "Config file validation error",
-                    extra={"config_path": str(file_path), "error": error},
+                    config_path=str(file_path),
+                    error=error,
                 )
             return {}
 

@@ -46,7 +46,7 @@ def load_all_risks() -> list[RiskDefinition]:
     Returns:
         A flat list of all RiskDefinition objects from all definition modules.
     """
-    from ai_artifact_risk_validator.models.risk import RiskDefinition  # noqa: F811
+    from ai_artifact_risk_validator.models.risk import RiskDefinition
 
     all_risks: list[RiskDefinition] = []
 

@@ -26,7 +26,6 @@ from ai_artifact_risk_validator.pipeline.gate import (
     compute_overall_gate,
 )
 
-
 # --- Strategies ---
 
 valid_severity_strategy = st.integers(min_value=1, max_value=10)
@@ -167,17 +166,13 @@ class TestFalsePositiveExclusionFromCounts:
 
     @given(findings=findings_list_strategy(min_size=1, max_size=20))
     @settings(max_examples=200)
-    def test_gate_counts_exclude_false_positive_findings(
-        self, findings: list[ScanFinding]
-    ) -> None:
+    def test_gate_counts_exclude_false_positive_findings(self, findings: list[ScanFinding]) -> None:
         """blocking + warning + info counts only include non-false-positive findings."""
         counts = compute_summary_counts(findings)
 
         non_fp_count = sum(1 for f in findings if not f.false_positive)
         gate_count_sum = (
-            counts["blocking_findings"]
-            + counts["warning_findings"]
-            + counts["info_findings"]
+            counts["blocking_findings"] + counts["warning_findings"] + counts["info_findings"]
         )
 
         assert gate_count_sum == non_fp_count

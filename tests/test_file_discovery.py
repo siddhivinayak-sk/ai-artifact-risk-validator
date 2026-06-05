@@ -1,9 +1,6 @@
 """Unit tests for FileDiscovery."""
 
-import tempfile
 from pathlib import Path
-
-import pytest
 
 from ai_artifact_risk_validator.models.config import ValidatorConfig
 from ai_artifact_risk_validator.pipeline.discovery import FileDiscovery

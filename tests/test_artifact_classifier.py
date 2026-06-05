@@ -15,7 +15,6 @@ import pytest
 from ai_artifact_risk_validator.classifiers import ArtifactClassifier, ClassificationResult
 from ai_artifact_risk_validator.models.enums import ArtifactType
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
