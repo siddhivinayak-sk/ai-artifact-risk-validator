@@ -144,5 +144,9 @@ CONFIG_SCHEMA: dict = {
             "minimum": 1,
             "description": "Maximum token budget for scanned artifacts.",
         },
+        "html_report_path": {
+            "type": ["string", "null"],
+            "description": "File path to write the HTML report to as a side effect.",
+        },
     },
 }

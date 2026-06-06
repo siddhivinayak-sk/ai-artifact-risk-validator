@@ -163,6 +163,12 @@ ai-artifact-validator verify ./my-artifacts --no-ignore
 
 # Control parallelism
 ai-artifact-validator verify ./my-artifacts --parallel 8
+
+# Output as standalone HTML report
+ai-artifact-validator verify ./my-artifacts --format html
+
+# Save HTML report to file
+ai-artifact-validator verify ./my-artifacts --format html --output report.html
 ```
 
 ### JSON report output examples
@@ -374,6 +380,9 @@ custom_artifact_patterns:
 # Custom plugin directories
 custom_plugin_dirs:
   - ./custom-scanners
+
+# HTML report output path (generates an HTML report as a side effect)
+html_report_path: ./reports/scan-report.html
 ```
 
 ### Configuration precedence
@@ -393,6 +402,7 @@ Configuration is merged with the following precedence (highest to lowest):
 | `AAV_SEVERITY_THRESHOLD` | Minimum severity to report | `5` |
 | `AAV_PARALLEL_FILES` | Parallel file workers | `8` |
 | `AAV_CACHE_DIR` | Cache directory path | `.aav-cache` |
+| `AAV_HTML_REPORT_PATH` | Write an HTML report to this path as a side effect (in addition to primary output) | `/tmp/report.html` |
 
 ### Inline suppression
 
@@ -479,6 +489,7 @@ from ai_artifact_risk_validator.models import ValidatorConfig
 | `gate_overrides` | `dict[str, GateAction]` | `{}` | Override gate actions by risk ID |
 | `custom_artifact_patterns` | `dict[str, list[str]]` | `{}` | Custom classification patterns |
 | `custom_plugin_dirs` | `list[str]` | `[]` | Directories for custom scanners |
+| `html_report_path` | `str \| None` | `None` | Path to write an HTML report as a side effect |
 
 ### `ScanReport` model
 
@@ -535,6 +546,35 @@ from ai_artifact_risk_validator.models import ScanFinding
 | `blocking_findings` | `int` | Count of BLOCK findings |
 | `warning_findings` | `int` | Count of WARN findings |
 | `info_findings` | `int` | Count of INFO findings |
+
+### `format_html` function
+
+```python
+from ai_artifact_risk_validator.reporting.formatters.html_formatter import format_html
+```
+
+Generates a standalone HTML report from a `ScanReport`. The output is a self-contained HTML5 document with all CSS inline — no external dependencies required.
+
+```python
+from ai_artifact_risk_validator import Validator
+from ai_artifact_risk_validator.reporting.formatters.html_formatter import format_html
+from pathlib import Path
+
+validator = Validator()
+report = validator.verify("path/to/artifacts")
+
+# Generate HTML string
+html = format_html(report)
+
+# Write to file
+Path("report.html").write_text(html, encoding="utf-8")
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `report` | `ScanReport` | The scan report to format |
+
+**Returns:** `str` — A complete standalone HTML document.
 
 ---
 
