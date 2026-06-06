@@ -11,6 +11,7 @@ Exit codes:
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -45,7 +46,7 @@ def cli() -> None:
 @click.option(
     "--format",
     "output_format",
-    type=click.Choice(["json", "text"], case_sensitive=False),
+    type=click.Choice(["json", "text", "html"], case_sensitive=False),
     default="json",
     help="Output format for the report.",
 )
@@ -117,6 +118,7 @@ def verify(
     from ai_artifact_risk_validator.config.manager import ConfigManager
     from ai_artifact_risk_validator.models.config import ValidatorConfig
     from ai_artifact_risk_validator.models.enums import ScannerModule
+    from ai_artifact_risk_validator.reporting.formatters.html_formatter import format_html
     from ai_artifact_risk_validator.reporting.formatters.text_formatter import format_text
     from ai_artifact_risk_validator.reporting.serializer import ReportSerializer
     from ai_artifact_risk_validator.validator import Validator
@@ -196,6 +198,8 @@ def verify(
     # Format the report
     if output_format == "text":
         report_output = format_text(report)
+    elif output_format == "html":
+        report_output = format_html(report)
     else:
         serializer = ReportSerializer()
         report_output = serializer.serialize(report)
@@ -209,6 +213,33 @@ def verify(
     else:
         # Write to stdout (not stderr)
         click.echo(report_output)
+
+    # Side-effect: write HTML report to configured path if set
+    html_side_effect_path = config.html_report_path or os.environ.get("AAV_HTML_REPORT_PATH")
+    if html_side_effect_path:
+        # Only write side-effect if it's a different path than --output
+        # (or if --format is not html, since --output already received non-HTML content)
+        should_write_side_effect = True
+        if output and output_format == "html":
+            # When --format html --output <path> and AAV_HTML_REPORT_PATH are set,
+            # write to both locations (--output already handled above)
+            resolved_output = str(Path(output).resolve())
+            resolved_side = str(Path(html_side_effect_path).resolve())
+            if resolved_output == resolved_side:
+                should_write_side_effect = False
+
+        if should_write_side_effect:
+            try:
+                side_effect_path = Path(html_side_effect_path)
+                side_effect_path.parent.mkdir(parents=True, exist_ok=True)
+                html_content = format_html(report) if output_format != "html" else report_output
+                side_effect_path.write_text(html_content, encoding="utf-8")
+                console.print(f"HTML report written to: {html_side_effect_path}")
+            except OSError as exc:
+                console.print(
+                    f"[yellow]Warning:[/yellow] Failed to write HTML report to "
+                    f"{html_side_effect_path}: {exc}"
+                )
 
     # Determine exit code from gate decision
     exit_code = _EXIT_CODES.get(report.summary.gate_decision, 0)

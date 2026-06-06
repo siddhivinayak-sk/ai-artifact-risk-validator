@@ -32,6 +32,7 @@ _ENV_VAR_MAP: dict[str, tuple[str, type]] = {
     "PARALLEL_SCANNERS": ("parallel_scanners", int),
     "CACHE_DIR": ("cache_dir", str),
     "MAX_FILE_SIZE": ("max_file_size_bytes", int),
+    "HTML_REPORT_PATH": ("html_report_path", str),
 }
 
 # Keys that belong to the flat config schema format
@@ -51,6 +52,7 @@ _FLAT_SCHEMA_KEYS = {
     "custom_artifact_patterns",
     "cache_dir",
     "token_budget_limit",
+    "html_report_path",
 }
 
 # Keys that indicate nested (design doc) YAML format
@@ -201,6 +203,8 @@ def _config_dict_to_validator_config(data: dict[str, Any]) -> dict[str, Any]:
         kwargs["cache_dir"] = data["cache_dir"]
     if "token_budget_limit" in data:
         kwargs["token_budget_limit"] = data["token_budget_limit"]
+    if "html_report_path" in data:
+        kwargs["html_report_path"] = str(data["html_report_path"])
 
     # List fields
     if "file_include_patterns" in data:
