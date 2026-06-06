@@ -246,9 +246,7 @@ class TestJsonFormatNonRegression:
             encoding="utf-8",
         )
         runner = CliRunner()
-        result = runner.invoke(
-            cli, ["verify", str(tmp_path), "--format", "json", *_QUIET_ARGS]
-        )
+        result = runner.invoke(cli, ["verify", str(tmp_path), "--format", "json", *_QUIET_ARGS])
         assert result.exit_code in (0, 1, 2)
         parsed = json.loads(result.output.strip())
         # Verify top-level schema
@@ -334,9 +332,7 @@ class TestTextFormatNonRegression:
             encoding="utf-8",
         )
         runner = CliRunner()
-        result = runner.invoke(
-            cli, ["verify", str(tmp_path), "--format", "text", *_QUIET_ARGS]
-        )
+        result = runner.invoke(cli, ["verify", str(tmp_path), "--format", "text", *_QUIET_ARGS])
         assert result.exit_code in (0, 1, 2)
         output = result.output.strip()
         assert len(output) > 0
@@ -413,9 +409,7 @@ class TestNoHtmlSideEffectWithoutConfig:
             encoding="utf-8",
         )
         runner = CliRunner()
-        result = runner.invoke(
-            cli, ["verify", str(scan_dir), "--format", "json", *_QUIET_ARGS]
-        )
+        result = runner.invoke(cli, ["verify", str(scan_dir), "--format", "json", *_QUIET_ARGS])
         assert result.exit_code in (0, 1, 2)
         # No .html files should be created anywhere in tmp_path
         html_files = list(tmp_path.rglob("*.html"))
@@ -430,9 +424,7 @@ class TestNoHtmlSideEffectWithoutConfig:
             encoding="utf-8",
         )
         runner = CliRunner()
-        result = runner.invoke(
-            cli, ["verify", str(scan_dir), "--format", "text", *_QUIET_ARGS]
-        )
+        result = runner.invoke(cli, ["verify", str(scan_dir), "--format", "text", *_QUIET_ARGS])
         assert result.exit_code in (0, 1, 2)
         # No .html files should be created anywhere in tmp_path
         html_files = list(tmp_path.rglob("*.html"))

@@ -112,12 +112,8 @@ def _build_scan_summary(findings: list[ScanFinding]) -> ScanSummary:
     blocking = sum(
         1 for f in findings if f.gate_action == GateAction.BLOCK and not f.false_positive
     )
-    warning = sum(
-        1 for f in findings if f.gate_action == GateAction.WARN and not f.false_positive
-    )
-    info = sum(
-        1 for f in findings if f.gate_action == GateAction.INFO and not f.false_positive
-    )
+    warning = sum(1 for f in findings if f.gate_action == GateAction.WARN and not f.false_positive)
+    info = sum(1 for f in findings if f.gate_action == GateAction.INFO and not f.false_positive)
 
     if blocking > 0:
         gate_decision = GateAction.BLOCK
@@ -355,8 +351,7 @@ class TestSuppressedFindingVisualDistinction:
         finding_cards = cards[1:]
 
         assert len(finding_cards) == len(report.findings), (
-            f"Expected {len(report.findings)} finding cards, "
-            f"found {len(finding_cards)}"
+            f"Expected {len(report.findings)} finding cards, found {len(finding_cards)}"
         )
 
         for i, finding in enumerate(report.findings):
@@ -370,7 +365,7 @@ class TestSuppressedFindingVisualDistinction:
                 )
             else:
                 # Active card should NOT start with ' suppressed'
-                assert not card_fragment.startswith(' suppressed'), (
+                assert not card_fragment.startswith(" suppressed"), (
                     f"Finding {finding.id} (index {i}) has false_positive=False "
                     f"but its card has the 'suppressed' class. "
                     f"Card starts with: {card_fragment[:50]}"
@@ -406,9 +401,7 @@ class TestFindingContentCompleteness:
             escaped_category = html.escape(finding.category.value, quote=True)
             escaped_description = html.escape(finding.description, quote=True)
 
-            assert escaped_id in output, (
-                f"Finding id '{escaped_id}' not found in HTML output"
-            )
+            assert escaped_id in output, f"Finding id '{escaped_id}' not found in HTML output"
             assert escaped_title in output, (
                 f"Finding title '{escaped_title}' not found in HTML output"
             )
@@ -423,9 +416,7 @@ class TestFindingContentCompleteness:
             )
 
     @given(
-        report=valid_scan_report().filter(
-            lambda r: any(f.evidence for f in r.findings)
-        ),
+        report=valid_scan_report().filter(lambda r: any(f.evidence for f in r.findings)),
     )
     @settings(max_examples=100)
     def test_evidence_appears_in_code_block(self, report: ScanReport) -> None:
@@ -440,9 +431,7 @@ class TestFindingContentCompleteness:
                 escaped_evidence = html.escape(finding.evidence, quote=True)
                 # Verify evidence appears between <pre><code> and </code></pre>
                 pre_pattern = re.compile(
-                    r"<pre><code>.*?"
-                    + re.escape(escaped_evidence)
-                    + r".*?</code></pre>",
+                    r"<pre><code>.*?" + re.escape(escaped_evidence) + r".*?</code></pre>",
                     re.DOTALL,
                 )
                 assert pre_pattern.search(output), (
@@ -464,9 +453,7 @@ class TestErrorMessageInclusion:
 
     @given(report=scan_report_with_errors())
     @settings(max_examples=100)
-    def test_all_error_messages_appear_html_escaped_in_output(
-        self, report: ScanReport
-    ) -> None:
+    def test_all_error_messages_appear_html_escaped_in_output(self, report: ScanReport) -> None:
         """All error messages from report.errors appear HTML-escaped in the output."""
         output = format_html(report)
 
@@ -493,9 +480,7 @@ adversarial_text = st.one_of(
     st.sampled_from(_XSS_PAYLOADS),
     # Text containing HTML special characters mixed with normal text
     st.text(
-        alphabet=st.sampled_from(
-            list('<>&"\'') + list(string.ascii_letters + string.digits + " ")
-        ),
+        alphabet=st.sampled_from(list("<>&\"'") + list(string.ascii_letters + string.digits + " ")),
         min_size=1,
         max_size=80,
     ),
@@ -559,9 +544,7 @@ def adversarial_scan_report(draw: st.DrawFn) -> ScanReport:
         artifact_path=adversarial_artifact_path,
         artifact_type=draw(st.one_of(st.none(), valid_artifact_type_strategy)),
         scan_timestamp=draw(valid_datetime_strategy),
-        scanner_version=draw(
-            st.from_regex(r"^[0-9]+\.[0-9]+\.[0-9]+$", fullmatch=True)
-        ),
+        scanner_version=draw(st.from_regex(r"^[0-9]+\.[0-9]+\.[0-9]+$", fullmatch=True)),
         findings=findings,
         summary=summary,
         errors=adversarial_errors,

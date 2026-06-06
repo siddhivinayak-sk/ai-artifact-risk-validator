@@ -64,7 +64,9 @@ def _render_finding_detail(finding: ScanFinding) -> str:
 
     # Location details
     line_str = str(finding.location.line) if finding.location.line is not None else "&mdash;"
-    end_line_str = str(finding.location.end_line) if finding.location.end_line is not None else "&mdash;"
+    end_line_str = (
+        str(finding.location.end_line) if finding.location.end_line is not None else "&mdash;"
+    )
     section_str = _escape(finding.location.section) if finding.location.section else "&mdash;"
 
     # References

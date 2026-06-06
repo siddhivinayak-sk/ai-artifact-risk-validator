@@ -405,7 +405,9 @@ class TestHtmlFormatter:
 
     # --- Task 4.2: Edge case unit tests ---
 
-    def test_zero_findings_produces_valid_html_with_no_findings_message(self, empty_report: ScanReport):
+    def test_zero_findings_produces_valid_html_with_no_findings_message(
+        self, empty_report: ScanReport
+    ):
         """Verify zero findings produces valid HTML5 with 'no findings' message.
 
         Requirements: 4.2, 6.2

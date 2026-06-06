@@ -209,9 +209,7 @@ class TestCLIHtmlEnvVarSideEffect:
 class TestCLIHtmlYamlConfigSideEffect:
     """Test html_report_path YAML config field triggers side-effect HTML file write."""
 
-    def test_yaml_config_triggers_html_side_effect(
-        self, runner: CliRunner, tmp_path: Path
-    ):
+    def test_yaml_config_triggers_html_side_effect(self, runner: CliRunner, tmp_path: Path):
         """html_report_path in YAML config causes HTML report to be written as side-effect."""
         scan_dir = tmp_path / "scan"
         scan_dir.mkdir()
@@ -242,9 +240,7 @@ class TestCLIHtmlYamlConfigSideEffect:
         content = html_path.read_text(encoding="utf-8")
         assert "<!DOCTYPE html>" in content
 
-    def test_yaml_config_html_path_creates_parent_dirs(
-        self, runner: CliRunner, tmp_path: Path
-    ):
+    def test_yaml_config_html_path_creates_parent_dirs(self, runner: CliRunner, tmp_path: Path):
         """html_report_path in YAML config creates parent directories."""
         scan_dir = tmp_path / "scan"
         scan_dir.mkdir()
