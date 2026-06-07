@@ -4,11 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ai-artifact-risk-validator"
-version = "0.1.0"
+version = "0.2.0"
 description = "Validates AI artifacts for security, performance, quality, compliance, and operational risks"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 authors = [
     { name = "AI Artifact Validator Team" },
 ]
@@ -18,7 +18,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Security",
@@ -157,7 +156,7 @@ ignore = [
     "DTZ007",  # call-datetime-strptime-without-zone — handled at data model level
     "ANN202",  # missing-return-type-private-function — not needed for private helpers
     "N802",    # invalid-function-name — test methods may use non-standard names
-    "B905",    # zip-without-explicit-strict — Python 3.10 compatibility
+    "B905",    # zip-without-explicit-strict — not enforced for simplicity
     "DTZ001",  # call-datetime-without-tzinfo — handled at data model level
     "S108",    # hardcoded-temp-file — false positives for /tmp paths in tests
     "SIM105",  # suppressible-exception — explicit try/except preferred
@@ -179,7 +178,7 @@ known-first-party = ["ai_artifact_risk_validator"]
 
 # --- Mypy Configuration ---
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.11"
 strict = false
 warn_return_any = true
 warn_unused_configs = true

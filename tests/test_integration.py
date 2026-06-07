@@ -104,7 +104,7 @@ class TestVerifyWithFixtureDirectories:
         assert report.artifact_path == str(FIXTURES_DIR)
         assert report.scan_id is not None
         assert report.scan_timestamp is not None
-        assert report.scanner_version == "0.1.0"
+        assert report.scanner_version == "0.2.0"
 
     def test_verify_fixtures_root_has_no_errors(self):
         """verify() on the fixtures directory completes without errors."""
@@ -476,7 +476,7 @@ class TestCLIVerifyCommand:
         """CLI --version displays version information."""
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "0.1.0" in result.output
+        assert "0.2.0" in result.output
 
     def test_cli_verify_directory_recursive_scan(self, runner, tmp_path):
         """CLI verify on a directory performs recursive scan."""

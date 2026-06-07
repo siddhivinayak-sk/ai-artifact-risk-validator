@@ -1,6 +1,6 @@
 # AI Artifact Risk Validator
 
-[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 
@@ -78,7 +78,7 @@ pip install -e ".[dev,test]"
 
 ### Requirements
 
-- Python 3.10, 3.11, or 3.12
+- Python 3.11 or 3.12
 - Core dependencies: pydantic, pyyaml, jsonschema, tiktoken, click, rich, structlog
 
 ---
@@ -181,7 +181,7 @@ ai-artifact-validator verify ./my-artifacts --format html --output report.html
   "artifact_path": "./my-artifacts",
   "artifact_type": null,
   "scan_timestamp": "2025-06-05T14:30:00.000000Z",
-  "scanner_version": "0.1.0",
+  "scanner_version": "0.2.0",
   "findings": [],
   "summary": {
     "total_findings": 0,
@@ -204,7 +204,7 @@ ai-artifact-validator verify ./my-artifacts --format html --output report.html
   "artifact_path": "./my-artifacts",
   "artifact_type": null,
   "scan_timestamp": "2025-06-05T14:32:15.123456Z",
-  "scanner_version": "0.1.0",
+  "scanner_version": "0.2.0",
   "findings": [
     {
       "id": "P-S1",

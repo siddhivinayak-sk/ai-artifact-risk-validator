@@ -24,6 +24,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Structured logging via structlog with configurable levels
 - CI/CD integration with exit codes (0=PASS, 1=BLOCK, 2=WARN)
 
+## [0.2.0] - 2025-06-08
+
+### Added
+
+- Standalone HTML report output format (`--format html`)
+- `AAV_HTML_REPORT_PATH` environment variable for side-effect HTML report generation
+- `html_report_path` configuration field in `.aav.yaml`
+- `format_html()` Python API function for programmatic HTML report generation
+- Property-based tests for HTML formatter correctness properties
+- Non-regression test suite for JSON and text format stability
+
 ## [0.1.0] - 2025-06-05
 
 ### Added
@@ -33,11 +44,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Pydantic data models: `ScanReport`, `ScanFinding`, `ScanSummary`, `FindingLocation`, `ValidatorConfig`, `RiskDefinition`
 - Enums: `ArtifactType` (14 types), `RiskCategory` (10 categories), `SeverityLabel`, `GateAction`, `Priority`, `ScannerModule`
 - Optional dependency groups: `[dev]`, `[test]`, `[ml]`, `[secrets]`, `[security]`, `[provenance]`, `[quality]`, `[all]`
-- Python 3.10, 3.11, 3.12 support
+- Python 3.11, 3.12 support
 - Core dependencies: pydantic, pyyaml, jsonschema, tiktoken, click, rich, structlog
 - `py.typed` marker for PEP 561 compliance
 - Makefile with standard development targets
 - Property-based tests using Hypothesis for model validation, report round-trip serialization, gate decision consistency
 
-[Unreleased]: https://github.com/ai-artifact-validator/ai-artifact-risk-validator/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/ai-artifact-validator/ai-artifact-risk-validator/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/ai-artifact-validator/ai-artifact-risk-validator/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ai-artifact-validator/ai-artifact-risk-validator/releases/tag/v0.1.0
