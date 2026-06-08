@@ -196,11 +196,17 @@ _SOURCE_PATTERNS: list[re.Pattern[str]] = [
 
 # --- Integrity/hash patterns ---
 _HASH_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"(?i)(?:^|\n)\s*(?:sha256|sha\-256|checksum|hash|integrity|digest)\s*[:=]"),
-    re.compile(r'(?i)"(?:sha256|checksum|hash|integrity|digest)"\s*:'),
-    re.compile(r"(?i)(?:sha256|sha-256|checksum|hash|integrity|digest):\s*[0-9a-fA-F]"),
+    re.compile(
+        r"(?i)(?:^|\n)\s*(?:sha256|sha\-256|sha512|sha\-512|checksum|hash|integrity|digest)\s*[:=]"
+    ),
+    re.compile(r'(?i)"(?:sha256|sha512|checksum|hash|integrity|digest)"\s*:'),
+    re.compile(
+        r"(?i)(?:sha256|sha-256|sha512|sha-512|checksum|hash|integrity|digest):\s*[0-9a-fA-F]"
+    ),
     re.compile(r"\b[0-9a-fA-F]{64}\b"),  # SHA-256 hex string
+    re.compile(r"\b[0-9a-fA-F]{128}\b"),  # SHA-512 hex string
     re.compile(r"sha256-[A-Za-z0-9+/=]{43,}"),  # SRI hash format
+    re.compile(r"sha512-[A-Za-z0-9+/=]{86,}"),  # SRI hash format SHA-512
 ]
 
 # --- Signature patterns ---
@@ -493,7 +499,11 @@ class ProvenanceChkScanner(BaseScanner):
         artifact_type: ArtifactType,
         artifact_path: str,
     ) -> list[ScanFinding]:
-        """Check for missing integrity hash/checksum.
+        """Check for missing integrity hash/checksum and validate hash format.
+
+        If a hash declaration is found, validates its format:
+        - SHA-256: exactly 64 hex characters
+        - SHA-512: exactly 128 hex characters
 
         Args:
             content: Artifact content.
@@ -501,7 +511,7 @@ class ProvenanceChkScanner(BaseScanner):
             artifact_path: Path to the artifact.
 
         Returns:
-            List of findings for missing integrity hashes.
+            List of findings for missing or malformed integrity hashes.
         """
         findings: list[ScanFinding] = []
 
@@ -518,6 +528,99 @@ class ProvenanceChkScanner(BaseScanner):
                     confidence=0.95,
                 )
             )
+        else:
+            # Validate hash format if a hash declaration is found
+            hash_format_findings = self._validate_hash_format(content, artifact_type, artifact_path)
+            findings.extend(hash_format_findings)
+
+        return findings
+
+    def _validate_hash_format(
+        self,
+        content: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Validate format of declared hash values.
+
+        Checks that:
+        - SHA-256 hashes are exactly 64 hex characters
+        - SHA-512 hashes are exactly 128 hex characters
+
+        A format mismatch indicates potential tampering or corruption,
+        reported with confidence 1.0.
+
+        Args:
+            content: Artifact content.
+            artifact_type: Type of artifact.
+            artifact_path: Path to the artifact.
+
+        Returns:
+            List of findings for malformed hashes.
+        """
+        findings: list[ScanFinding] = []
+
+        # Pattern to extract hash values from declarations
+        sha256_decl = re.compile(r"(?i)(?:sha256|sha-256)\s*[:=]\s*['\"]?([0-9a-fA-F]+)['\"]?")
+        sha512_decl = re.compile(r"(?i)(?:sha512|sha-512)\s*[:=]\s*['\"]?([0-9a-fA-F]+)['\"]?")
+        generic_hash_decl = re.compile(
+            r"(?i)(?:checksum|hash|integrity|digest)\s*[:=]\s*['\"]?([0-9a-fA-F]+)['\"]?"
+        )
+
+        lines = content.splitlines()
+
+        for line_num, line in enumerate(lines, start=1):
+            # Check SHA-256 declarations
+            for match in sha256_decl.finditer(line):
+                hash_value = match.group(1)
+                if len(hash_value) != 64:
+                    integrity_risk_id = _ARTIFACT_INTEGRITY_MAP.get(artifact_type, "GOV-1")
+                    findings.append(
+                        self._create_finding(
+                            risk_id=integrity_risk_id,
+                            artifact_type=artifact_type,
+                            artifact_path=artifact_path,
+                            evidence=f"SHA-256 hash has invalid length: {len(hash_value)} chars (expected 64)",
+                            confidence=1.0,
+                            line=line_num,
+                        )
+                    )
+
+            # Check SHA-512 declarations
+            for match in sha512_decl.finditer(line):
+                hash_value = match.group(1)
+                if len(hash_value) != 128:
+                    integrity_risk_id = _ARTIFACT_INTEGRITY_MAP.get(artifact_type, "GOV-1")
+                    findings.append(
+                        self._create_finding(
+                            risk_id=integrity_risk_id,
+                            artifact_type=artifact_type,
+                            artifact_path=artifact_path,
+                            evidence=f"SHA-512 hash has invalid length: {len(hash_value)} chars (expected 128)",
+                            confidence=1.0,
+                            line=line_num,
+                        )
+                    )
+
+            # Check generic hash/checksum declarations for common format issues
+            for match in generic_hash_decl.finditer(line):
+                hash_value = match.group(1)
+                # Skip if already caught by sha256/sha512 patterns
+                if sha256_decl.search(line) or sha512_decl.search(line):
+                    continue
+                # A generic hash should be either 64 (SHA-256) or 128 (SHA-512) hex chars
+                if len(hash_value) not in (64, 128):
+                    integrity_risk_id = _ARTIFACT_INTEGRITY_MAP.get(artifact_type, "GOV-1")
+                    findings.append(
+                        self._create_finding(
+                            risk_id=integrity_risk_id,
+                            artifact_type=artifact_type,
+                            artifact_path=artifact_path,
+                            evidence=f"Hash value has unexpected length: {len(hash_value)} chars (expected 64 for SHA-256 or 128 for SHA-512)",
+                            confidence=1.0,
+                            line=line_num,
+                        )
+                    )
 
         return findings
 

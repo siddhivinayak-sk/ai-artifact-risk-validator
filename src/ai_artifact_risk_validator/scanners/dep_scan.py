@@ -1,13 +1,29 @@
-"""DepScan scanner module for detecting dependency-related security risks.
+"""DepScan scanner module.
 
-Detects vulnerable, outdated, unpinned, and potentially malicious dependencies
-in AI artifact manifests (requirements.txt, package.json, pyproject.toml).
-Uses regex-based parsing with optional integration for pip-audit, safety,
-and packaging libraries.
+Scans AI artifact dependency manifests and lockfiles for:
+- Known vulnerable package versions (CVE matching)
+- Unpinned or wildcard version specifications
+- Typosquatting package names
+- Excessive dependency counts
+- Untrusted dependency sources (git URLs, direct URLs)
+- Overly broad version ranges
+
+Supports parsing:
+- requirements.txt
+- package.json
+- pyproject.toml
+- Pipfile.lock
+- yarn.lock
+- pnpm-lock.yaml
+- Cargo.lock
+- go.sum
+
+Detects risk IDs: MCP-S4, MCP-S11, MCP-S12, PL-S3, PL-S8, SK-S7
 """
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -23,131 +39,132 @@ from ai_artifact_risk_validator.models import (
 )
 from ai_artifact_risk_validator.scanners.base import BaseScanner
 
-# --- Risk metadata lookup ---
-_RISK_METADATA: dict[str, dict[str, Any]] = {
-    "MCP-S4": {
-        "title": "Vulnerable Dependency in MCP Server",
-        "severity_score": 7,
-        "severity_label": SeverityLabel.HIGH,
-        "priority": Priority.P1,
-        "gate_action": GateAction.BLOCK,
-        "category": RiskCategory.SECURITY,
-        "description": "MCP server depends on packages with known CVE vulnerabilities.",
-        "remediation": "Update vulnerable dependencies. Pin to secure versions. Run regular dependency audits.",
-    },
-    "MCP-S11": {
-        "title": "Outdated MCP Runtime Dependencies",
-        "severity_score": 5,
-        "severity_label": SeverityLabel.MEDIUM,
-        "priority": Priority.P2,
-        "gate_action": GateAction.WARN,
-        "category": RiskCategory.SECURITY,
-        "description": "MCP server uses outdated runtime dependencies that may have unpatched vulnerabilities.",
-        "remediation": "Update runtime dependencies. Set up automated dependency updates. Monitor security advisories.",
-    },
-    "MCP-S12": {
-        "title": "Typosquatting Risk in MCP Dependencies",
-        "severity_score": 7,
-        "severity_label": SeverityLabel.HIGH,
-        "priority": Priority.P1,
-        "gate_action": GateAction.BLOCK,
-        "category": RiskCategory.SECURITY,
-        "description": "MCP server depends on packages with names similar to popular packages, suggesting typosquatting.",
-        "remediation": "Verify package names against registries. Use exact verified package names. Audit all dependencies.",
-    },
-    "PL-S3": {
-        "title": "Vulnerable Plugin Dependencies",
-        "severity_score": 7,
-        "severity_label": SeverityLabel.HIGH,
-        "priority": Priority.P1,
-        "gate_action": GateAction.BLOCK,
-        "category": RiskCategory.SECURITY,
-        "description": "Plugin depends on packages with known security vulnerabilities.",
-        "remediation": "Update vulnerable dependencies. Pin to secure versions. Run dependency audit.",
-    },
-    "PL-S8": {
-        "title": "Typosquatting Risk in Plugin Name",
-        "severity_score": 7,
-        "severity_label": SeverityLabel.HIGH,
-        "priority": Priority.P1,
-        "gate_action": GateAction.BLOCK,
-        "category": RiskCategory.SECURITY,
-        "description": "Plugin name is suspiciously similar to a popular plugin, suggesting typosquatting attack.",
-        "remediation": "Verify plugin name matches intended package. Check download counts and publisher.",
-    },
-    "SK-S7": {
-        "title": "Unverified External Dependency",
-        "severity_score": 7,
-        "severity_label": SeverityLabel.HIGH,
-        "priority": Priority.P1,
-        "gate_action": GateAction.BLOCK,
-        "category": RiskCategory.SECURITY,
-        "description": "Skill depends on external packages or modules without version pinning or integrity verification.",
-        "remediation": "Pin all dependency versions. Verify package checksums. Use lockfiles for reproducibility.",
-    },
-}
+# ---------------------------------------------------------------------------
+# Known vulnerable packages with version ranges and CVE references
+# ---------------------------------------------------------------------------
 
-# Artifact type to vulnerability risk ID mapping
-_VULN_RISK_MAP: dict[ArtifactType, str] = {
-    ArtifactType.MCP: "MCP-S4",
-    ArtifactType.PLUGIN: "PL-S3",
-    ArtifactType.SKILL: "SK-S7",
-    ArtifactType.HOOK: "MCP-S4",  # Hooks use MCP-S4 for vulnerable deps
-}
-
-# Artifact type to outdated risk ID mapping
-_OUTDATED_RISK_MAP: dict[ArtifactType, str] = {
-    ArtifactType.MCP: "MCP-S11",
-    ArtifactType.PLUGIN: "PL-S3",
-    ArtifactType.SKILL: "SK-S7",
-    ArtifactType.HOOK: "MCP-S11",
-}
-
-# Artifact type to typosquatting risk ID mapping
-_TYPOSQUAT_RISK_MAP: dict[ArtifactType, str] = {
-    ArtifactType.MCP: "MCP-S12",
-    ArtifactType.PLUGIN: "PL-S8",
-    ArtifactType.SKILL: "SK-S7",
-    ArtifactType.HOOK: "MCP-S12",
-}
-
-# Artifact type to unpinned dependency risk ID mapping
-_UNPINNED_RISK_MAP: dict[ArtifactType, str] = {
-    ArtifactType.MCP: "MCP-S11",
-    ArtifactType.PLUGIN: "PL-S3",
-    ArtifactType.SKILL: "SK-S7",
-    ArtifactType.HOOK: "MCP-S11",
-}
-
-# --- Known vulnerable package patterns ---
-# Packages with known critical vulnerabilities (common examples)
-_KNOWN_VULNERABLE_PACKAGES: dict[str, tuple[str, str]] = {
+_KNOWN_VULNERABILITIES: list[dict[str, Any]] = [
     # Python packages
-    "pyyaml": ("< 5.4", "CVE-2020-14343: Arbitrary code execution via yaml.load()"),
-    "urllib3": ("< 1.26.5", "CVE-2021-33503: ReDoS vulnerability"),
-    "requests": ("< 2.20.0", "CVE-2018-18074: Redirect credential leak"),
-    "django": ("< 3.2.4", "CVE-2021-33203: Path traversal"),
-    "flask": ("< 2.0.0", "CVE-2019-1010083: DOS via large request"),
-    "pillow": ("< 8.3.2", "CVE-2021-34552: Buffer overflow"),
-    "cryptography": ("< 3.3.2", "CVE-2020-36242: Integer overflow"),
-    "jinja2": ("< 2.11.3", "CVE-2020-28493: ReDoS vulnerability"),
-    "numpy": ("< 1.22.0", "CVE-2021-41496: Buffer overflow"),
-    "setuptools": ("< 65.5.1", "CVE-2022-40897: ReDoS in package_index"),
+    {
+        "name": "pyyaml",
+        "ecosystem": "python",
+        "vulnerable_below": "5.4",
+        "cve": "CVE-2020-14343",
+        "description": "Arbitrary code execution via unsafe load",
+    },
+    {
+        "name": "requests",
+        "ecosystem": "python",
+        "vulnerable_below": "2.20.0",
+        "cve": "CVE-2018-18074",
+        "description": "Session fixation vulnerability",
+    },
+    {
+        "name": "urllib3",
+        "ecosystem": "python",
+        "vulnerable_below": "1.26.5",
+        "cve": "CVE-2021-33503",
+        "description": "ReDoS vulnerability in URL authority parsing",
+    },
+    {
+        "name": "pillow",
+        "ecosystem": "python",
+        "vulnerable_below": "9.0.0",
+        "cve": "CVE-2022-22817",
+        "description": "Arbitrary code execution via PIL.ImageMath.eval",
+    },
+    {
+        "name": "jinja2",
+        "ecosystem": "python",
+        "vulnerable_below": "2.11.3",
+        "cve": "CVE-2020-28493",
+        "description": "ReDoS in urlize filter",
+    },
+    {
+        "name": "django",
+        "ecosystem": "python",
+        "vulnerable_below": "3.2.14",
+        "cve": "CVE-2022-34265",
+        "description": "SQL injection in Trunc and Extract functions",
+    },
+    {
+        "name": "flask",
+        "ecosystem": "python",
+        "vulnerable_below": "2.2.5",
+        "cve": "CVE-2023-30861",
+        "description": "Cookie theft via proxy misconfiguration",
+    },
+    {
+        "name": "cryptography",
+        "ecosystem": "python",
+        "vulnerable_below": "39.0.1",
+        "cve": "CVE-2023-23931",
+        "description": "Memory corruption in PKCS12 parsing",
+    },
+    {
+        "name": "numpy",
+        "ecosystem": "python",
+        "vulnerable_below": "1.22.0",
+        "cve": "CVE-2021-41496",
+        "description": "Buffer overflow in array operations",
+    },
     # Node.js packages
-    "lodash": ("< 4.17.21", "CVE-2021-23337: Command injection"),
-    "minimist": ("< 1.2.6", "CVE-2021-44906: Prototype pollution"),
-    "node-fetch": ("< 2.6.7", "CVE-2022-0235: Credential leak"),
-    "express": ("< 4.17.3", "CVE-2022-24999: qs prototype pollution"),
-    "axios": ("< 0.21.2", "CVE-2021-3749: ReDoS vulnerability"),
-    "glob-parent": ("< 5.1.2", "CVE-2020-28469: ReDoS vulnerability"),
-    "trim-newlines": ("< 3.0.1", "CVE-2021-33623: ReDoS vulnerability"),
-    "path-parse": ("< 1.0.7", "CVE-2021-23343: ReDoS vulnerability"),
-    "tar": ("< 6.1.9", "CVE-2021-37701: Path traversal"),
-    "ws": ("< 7.4.6", "CVE-2021-32640: ReDoS vulnerability"),
-}
+    {
+        "name": "lodash",
+        "ecosystem": "node",
+        "vulnerable_below": "4.17.21",
+        "cve": "CVE-2021-23337",
+        "description": "Command injection via template function",
+    },
+    {
+        "name": "express",
+        "ecosystem": "node",
+        "vulnerable_below": "4.17.3",
+        "cve": "CVE-2022-24999",
+        "description": "Open redirect via qs prototype pollution",
+    },
+    {
+        "name": "minimist",
+        "ecosystem": "node",
+        "vulnerable_below": "1.2.6",
+        "cve": "CVE-2021-44906",
+        "description": "Prototype pollution",
+    },
+    {
+        "name": "axios",
+        "ecosystem": "node",
+        "vulnerable_below": "0.21.2",
+        "cve": "CVE-2021-3749",
+        "description": "ReDoS vulnerability",
+    },
+    {
+        "name": "node-fetch",
+        "ecosystem": "node",
+        "vulnerable_below": "2.6.7",
+        "cve": "CVE-2022-0235",
+        "description": "Exposure of sensitive information to unauthorized actor",
+    },
+    {
+        "name": "json5",
+        "ecosystem": "node",
+        "vulnerable_below": "2.2.2",
+        "cve": "CVE-2022-46175",
+        "description": "Prototype pollution via parse method",
+    },
+    {
+        "name": "semver",
+        "ecosystem": "node",
+        "vulnerable_below": "7.5.2",
+        "cve": "CVE-2022-25883",
+        "description": "ReDoS vulnerability in semver parsing",
+    },
+]
 
-# --- Popular package names for typosquatting detection ---
-_POPULAR_PACKAGES: set[str] = {
+# ---------------------------------------------------------------------------
+# Popular packages for typosquatting detection
+# ---------------------------------------------------------------------------
+
+_POPULAR_PACKAGES: list[str] = [
     # Python
     "requests",
     "flask",
@@ -155,32 +172,24 @@ _POPULAR_PACKAGES: set[str] = {
     "numpy",
     "pandas",
     "scipy",
-    "matplotlib",
-    "tensorflow",
-    "pytorch",
-    "torch",
-    "pillow",
-    "cryptography",
     "pyyaml",
+    "cryptography",
+    "pillow",
+    "boto3",
+    "urllib3",
+    "setuptools",
+    "pytest",
+    "jinja2",
     "pydantic",
     "fastapi",
-    "uvicorn",
-    "sqlalchemy",
     "celery",
-    "redis",
-    "boto3",
-    "botocore",
-    "jinja2",
-    "click",
-    "rich",
-    "httpx",
+    "sqlalchemy",
     "aiohttp",
+    "beautifulsoup4",
     # Node.js
     "express",
-    "react",
-    "vue",
-    "angular",
     "lodash",
+    "react",
     "axios",
     "webpack",
     "typescript",
@@ -188,56 +197,45 @@ _POPULAR_PACKAGES: set[str] = {
     "prettier",
     "jest",
     "mocha",
-    "chai",
+    "moment",
+    "commander",
+    "chalk",
+    "underscore",
+    "debug",
     "next",
-    "nuxt",
-    "gatsby",
-    "svelte",
-    "tailwindcss",
-    "postcss",
-    "nodemon",
-    "dotenv",
-    "cors",
-    "helmet",
-    "morgan",
-    "passport",
+    "vue",
+    "angular",
+    "jquery",
     "socket.io",
-    "mongoose",
-    "sequelize",
-    "prisma",
-    "graphql",
-}
+    # Rust
+    "serde",
+    "tokio",
+    "reqwest",
+    "clap",
+    "rand",
+]
 
-# Excessive dependency threshold
+# Maximum number of dependencies before flagging as excessive
 _EXCESSIVE_DEP_THRESHOLD = 50
 
-# Regex for parsing requirements.txt lines
-_REQUIREMENTS_LINE_RE = re.compile(
-    r"^\s*([a-zA-Z0-9][\w\-.]*[a-zA-Z0-9])\s*"  # Package name
-    r"(?:"
-    r"(==|!=|>=|<=|>|<|~=|===)\s*"  # Operator
-    r"([\w\.\-\*]+)"  # Version
-    r")?\s*"  # Version spec is optional (unpinned)
-    r"(?:;.*)?$"  # Environment markers
+# Regex patterns for requirements.txt lines
+_REQ_LINE_RE = re.compile(
+    r"^([A-Za-z0-9][\w.\-]*(?:\[[^\]]+\])?)\s*(==|>=|<=|!=|~=|>|<|===)?\s*([^\s;#,]+)?",
 )
+_REQ_EXTRAS_RE = re.compile(r"^([A-Za-z0-9][\w.\-]*?)(?:\[.*?\])?$")
 
-# Regex for detecting wildcard/star versions
-_WILDCARD_VERSION_RE = re.compile(r"^\*$|^\d+\.\*$|^\d+\.\d+\.\*$")
+# Regex to detect git/URL-based installs
+_GIT_URL_RE = re.compile(r"^(git\+|https?://|ssh://|ftp://)", re.IGNORECASE)
+
+# Unpinned/wildcard version patterns for Node.js
+_WILDCARD_VERSIONS = {"*", "latest", "x", "X", ""}
+_BROAD_RANGE_RE = re.compile(r"^[~^>]")
 
 
 def _levenshtein_distance(s1: str, s2: str) -> int:
-    """Compute Levenshtein (edit) distance between two strings.
-
-    Args:
-        s1: First string.
-        s2: Second string.
-
-    Returns:
-        Integer edit distance.
-    """
+    """Compute the Levenshtein (edit) distance between two strings."""
     if len(s1) < len(s2):
         return _levenshtein_distance(s2, s1)
-
     if len(s2) == 0:
         return len(s1)
 
@@ -255,595 +253,435 @@ def _levenshtein_distance(s1: str, s2: str) -> int:
 
 
 def _is_typosquat_candidate(package_name: str) -> str | None:
-    """Check if a package name is suspiciously similar to a popular package.
+    """Check if a package name might be a typosquat of a popular package.
 
-    Args:
-        package_name: The package name to check.
-
-    Returns:
-        The popular package name it resembles, or None.
+    Returns the popular package name it's similar to, or None.
     """
-    normalized = package_name.lower().replace("-", "").replace("_", "")
+    name_lower = package_name.lower().strip()
+
+    # Skip if the name is too short (high false positive rate)
+    if len(name_lower) < 4:
+        return None
+
+    # Skip exact matches to popular packages
+    if name_lower in {p.lower() for p in _POPULAR_PACKAGES}:
+        return None
 
     for popular in _POPULAR_PACKAGES:
-        popular_normalized = popular.lower().replace("-", "").replace("_", "")
+        popular_lower = popular.lower()
 
-        # Skip exact matches
-        if normalized == popular_normalized:
-            return None
+        # Only compare packages of similar length
+        len_diff = abs(len(name_lower) - len(popular_lower))
+        if len_diff > 2:
+            continue
 
-        # Check edit distance (1-2 for short names, 1-2 for longer)
-        distance = _levenshtein_distance(normalized, popular_normalized)
-        min_len = min(len(normalized), len(popular_normalized))
+        distance = _levenshtein_distance(name_lower, popular_lower)
 
-        if min_len >= 4 and distance <= 2 and distance > 0:
+        # Flag if edit distance is 1-2 (very similar but not exact)
+        if 1 <= distance <= 2:
             return popular
 
     return None
 
 
 def _parse_requirements_txt(content: str) -> list[dict[str, Any]]:
-    """Parse requirements.txt format dependencies.
+    """Parse a requirements.txt file and extract dependency info.
 
-    Args:
-        content: File content in requirements.txt format.
-
-    Returns:
-        List of dicts with keys: name, version, operator, line, pinned.
+    Returns a list of dicts with keys: name, version, operator, pinned, line_number.
     """
     deps: list[dict[str, Any]] = []
-    for line_num, line in enumerate(content.splitlines(), start=1):
-        stripped = line.strip()
-        # Skip comments, blank lines, options, and URLs
-        if not stripped or stripped.startswith("#") or stripped.startswith("-"):
-            continue
-        if "://" in stripped:
+
+    for line_num, raw_line in enumerate(content.splitlines(), start=1):
+        line = raw_line.strip()
+
+        # Skip blanks, comments, pip options
+        if not line or line.startswith("#") or line.startswith("-"):
             continue
 
-        match = _REQUIREMENTS_LINE_RE.match(stripped)
-        if match:
-            name = match.group(1)
-            operator = match.group(2)
-            version = match.group(3)
-            pinned = operator == "==" and version is not None
-            deps.append(
-                {
-                    "name": name,
-                    "version": version,
-                    "operator": operator,
-                    "line": line_num,
-                    "pinned": pinned,
-                }
-            )
+        # Skip git/URL-based installs (handled separately)
+        if _GIT_URL_RE.match(line):
+            continue
+
+        # Strip environment markers
+        if ";" in line:
+            line = line.split(";")[0].strip()
+
+        # Strip inline comments
+        if " #" in line:
+            line = line.split(" #")[0].strip()
+
+        match = _REQ_LINE_RE.match(line)
+        if not match:
+            continue
+
+        raw_name = match.group(1)
+        operator = match.group(2)
+        version = match.group(3)
+
+        # Strip extras from name (e.g., "package[extra]" -> "package")
+        extras_match = _REQ_EXTRAS_RE.match(raw_name)
+        name = extras_match.group(1) if extras_match else raw_name
+
+        is_pinned = operator == "==" and version is not None
+
+        deps.append(
+            {
+                "name": name,
+                "version": version,
+                "operator": operator,
+                "pinned": is_pinned,
+                "wildcard": False,
+                "line_number": line_num,
+            }
+        )
+
     return deps
 
 
 def _parse_package_json(content: str) -> list[dict[str, Any]]:
-    """Parse package.json format dependencies.
+    """Parse a package.json file and extract dependency info.
 
-    Args:
-        content: File content as JSON string.
-
-    Returns:
-        List of dicts with keys: name, version, line, pinned.
+    Returns a list of dicts with keys: name, version, pinned, wildcard, line_number.
     """
-    import json
-
-    deps: list[dict[str, Any]] = []
     try:
         data = json.loads(content)
     except (json.JSONDecodeError, ValueError):
-        return deps
+        return []
 
+    if not isinstance(data, dict):
+        return []
+
+    deps: list[dict[str, Any]] = []
     dep_sections = ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]
+
     for section in dep_sections:
-        section_deps = data.get(section, {})
-        if not isinstance(section_deps, dict):
+        section_data = data.get(section)
+        if not isinstance(section_data, dict):
             continue
-        for name, version_spec in section_deps.items():
+
+        for name, version_spec in section_data.items():
             if not isinstance(version_spec, str):
                 continue
-            # Find line number by searching content
-            line_num = _find_line_for_key(content, name)
-            # Determine if pinned: exact version without range chars
-            is_pinned = bool(re.match(r"^\d+\.\d+\.\d+$", version_spec))
-            is_wildcard = (
-                version_spec in ("*", "latest")
-                or _WILDCARD_VERSION_RE.match(version_spec) is not None
-            )
+
+            version_str = version_spec.strip()
+            is_wildcard = version_str in _WILDCARD_VERSIONS
+            is_pinned = bool(re.match(r"^\d+\.\d+\.\d+$", version_str)) and not is_wildcard
+
             deps.append(
                 {
                     "name": name,
-                    "version": version_spec,
+                    "version": version_str if version_str else None,
                     "operator": None,
-                    "line": line_num,
                     "pinned": is_pinned,
                     "wildcard": is_wildcard,
+                    "line_number": 1,  # JSON doesn't have easy line mapping
                 }
             )
+
     return deps
 
 
 def _parse_pyproject_toml(content: str) -> list[dict[str, Any]]:
-    """Parse pyproject.toml dependencies section.
+    """Parse a pyproject.toml file for PEP 621 dependencies.
 
-    Uses regex to extract dependencies without requiring a TOML parser.
-
-    Args:
-        content: File content of pyproject.toml.
-
-    Returns:
-        List of dicts with keys: name, version, line, pinned.
+    Uses regex-based parsing to avoid requiring tomli/tomllib.
+    Returns a list of dicts similar to requirements.txt parsing.
     """
     deps: list[dict[str, Any]] = []
 
-    # Look for dependencies = [...] section
-    dep_section_re = re.compile(r"dependencies\s*=\s*\[([^\]]*)\]", re.DOTALL)
+    # Find dependencies array in [project] section
+    # Match: dependencies = [ ... ]
+    dep_block_re = re.compile(r"dependencies\s*=\s*\[(.*?)\]", re.DOTALL)
+    match = dep_block_re.search(content)
+    if not match:
+        return deps
 
-    for section_match in dep_section_re.finditer(content):
-        section_text = section_match.group(1)
-        section_start = content[: section_match.start()].count("\n") + 1
+    deps_block = match.group(1)
+    # Extract individual dependency strings
+    dep_str_re = re.compile(r'"([^"]+)"|\'([^\']+)\'')
 
-        # Parse individual dependency strings
-        dep_str_re = re.compile(r'["\']([^"\']+)["\']')
-        for dep_match in dep_str_re.finditer(section_text):
-            dep_str = dep_match.group(1)
-            # Calculate line number
-            lines_before = section_text[: dep_match.start()].count("\n")
-            line_num = section_start + lines_before + 1
+    for dep_match in dep_str_re.finditer(deps_block):
+        dep_str = dep_match.group(1) or dep_match.group(2)
+        dep_str = dep_str.strip()
 
-            # Parse the dependency specifier
-            req_match = re.match(
-                r"([a-zA-Z0-9][\w\-.]*[a-zA-Z0-9])\s*(?:(>=|==|<=|!=|~=|>|<)\s*([\w\.\-\*]+))?",
-                dep_str,
-            )
-            if req_match:
-                name = req_match.group(1)
-                operator = req_match.group(2)
-                version = req_match.group(3)
-                pinned = operator == "==" and version is not None
-                deps.append(
-                    {
-                        "name": name,
-                        "version": version,
-                        "operator": operator,
-                        "line": line_num,
-                        "pinned": pinned,
-                    }
-                )
+        # Parse like requirements.txt line
+        req_match = _REQ_LINE_RE.match(dep_str)
+        if not req_match:
+            continue
+
+        raw_name = req_match.group(1)
+        operator = req_match.group(2)
+        version = req_match.group(3)
+
+        extras_match = _REQ_EXTRAS_RE.match(raw_name)
+        name = extras_match.group(1) if extras_match else raw_name
+
+        is_pinned = operator == "==" and version is not None
+
+        deps.append(
+            {
+                "name": name,
+                "version": version,
+                "operator": operator,
+                "pinned": is_pinned,
+                "wildcard": False,
+                "line_number": 1,
+            }
+        )
 
     return deps
 
 
-def _find_line_for_key(content: str, key: str) -> int:
-    """Find the line number where a JSON key appears.
+def _parse_pipfile_lock(content: str) -> list[dict[str, Any]]:
+    """Parse a Pipfile.lock JSON file and extract dependency info."""
+    try:
+        data = json.loads(content)
+    except (json.JSONDecodeError, ValueError):
+        return []
 
-    Args:
-        content: Full file content.
-        key: The key to search for.
+    if not isinstance(data, dict):
+        return []
 
-    Returns:
-        Line number (1-indexed), or 1 if not found.
+    deps: list[dict[str, Any]] = []
+
+    for section in ("default", "develop"):
+        section_data = data.get(section)
+        if not isinstance(section_data, dict):
+            continue
+
+        for name, info in section_data.items():
+            if not isinstance(info, dict):
+                continue
+            version = info.get("version", "")
+            # Pipfile.lock versions are typically "==X.Y.Z"
+            if version.startswith("=="):
+                version = version[2:]
+                is_pinned = True
+            else:
+                is_pinned = bool(version)
+
+            deps.append(
+                {
+                    "name": name,
+                    "version": version or None,
+                    "operator": "==" if is_pinned else None,
+                    "pinned": is_pinned,
+                    "wildcard": False,
+                    "line_number": 1,
+                }
+            )
+
+    return deps
+
+
+def _parse_cargo_lock(content: str) -> list[dict[str, Any]]:
+    """Parse a Cargo.lock file (TOML-like) for Rust dependencies."""
+    deps: list[dict[str, Any]] = []
+    # Cargo.lock uses [[package]] blocks with name and version
+    package_re = re.compile(r'\[\[package\]\]\s*\nname\s*=\s*"([^"]+)"\s*\nversion\s*=\s*"([^"]+)"')
+
+    for match in package_re.finditer(content):
+        name = match.group(1)
+        version = match.group(2)
+        deps.append(
+            {
+                "name": name,
+                "version": version,
+                "operator": "==",
+                "pinned": True,
+                "wildcard": False,
+                "line_number": 1,
+            }
+        )
+
+    return deps
+
+
+def _parse_go_sum(content: str) -> list[dict[str, Any]]:
+    """Parse a go.sum file for Go module dependencies."""
+    deps: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for line_num, raw_line in enumerate(content.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        parts = line.split()
+        if len(parts) < 3:
+            continue
+
+        name = parts[0]
+        version = parts[1].lstrip("v").split("/")[0]
+
+        # Deduplicate (go.sum has multiple entries per module)
+        key = f"{name}@{version}"
+        if key in seen:
+            continue
+        seen.add(key)
+
+        deps.append(
+            {
+                "name": name,
+                "version": version,
+                "operator": "==",
+                "pinned": True,
+                "wildcard": False,
+                "line_number": line_num,
+            }
+        )
+
+    return deps
+
+
+def _parse_yarn_lock(content: str) -> list[dict[str, Any]]:
+    """Parse a yarn.lock file for Node.js dependencies."""
+    deps: list[dict[str, Any]] = []
+    # Yarn lock format: "package@version": followed by resolved version
+    entry_re = re.compile(r'^"?([^@\s"]+)@[^"]*"?:\s*$', re.MULTILINE)
+    version_re = re.compile(r'^\s+version\s+"?([^"\s]+)"?\s*$', re.MULTILINE)
+
+    entries = list(entry_re.finditer(content))
+    versions = list(version_re.finditer(content))
+
+    for i, entry_match in enumerate(entries):
+        name = entry_match.group(1)
+        version = versions[i].group(1) if i < len(versions) else None
+        deps.append(
+            {
+                "name": name,
+                "version": version,
+                "operator": "==",
+                "pinned": version is not None,
+                "wildcard": False,
+                "line_number": 1,
+            }
+        )
+
+    return deps
+
+
+def _parse_pnpm_lock(content: str) -> list[dict[str, Any]]:
+    """Parse a pnpm-lock.yaml file for Node.js dependencies."""
+    deps: list[dict[str, Any]] = []
+    # pnpm lockfile v6+ uses /package@version format
+    pkg_re = re.compile(r"^\s+/?([^@\s/]+)@(\S+):", re.MULTILINE)
+
+    for match in pkg_re.finditer(content):
+        name = match.group(1)
+        version = match.group(2)
+        deps.append(
+            {
+                "name": name,
+                "version": version,
+                "operator": "==",
+                "pinned": True,
+                "wildcard": False,
+                "line_number": 1,
+            }
+        )
+
+    return deps
+
+
+def _version_less_than(version: str, threshold: str) -> bool:
+    """Compare two version strings. Returns True if version < threshold.
+
+    Uses simple tuple comparison of numeric parts. Falls back to string
+    comparison if parsing fails.
     """
-    pattern = re.compile(rf'["\']{re.escape(key)}["\']')
-    for line_num, line in enumerate(content.splitlines(), start=1):
-        if pattern.search(line):
-            return line_num
-    return 1
+    try:
+        # Try importing packaging for accurate comparison
+        from packaging.version import Version
+
+        return Version(version) < Version(threshold)
+    except (ImportError, Exception):
+        pass
+
+    # Fallback: simple numeric tuple comparison
+    try:
+        v_parts = tuple(int(x) for x in re.split(r"[.\-+]", version) if x.isdigit())
+        t_parts = tuple(int(x) for x in re.split(r"[.\-+]", threshold) if x.isdigit())
+        return v_parts < t_parts
+    except (ValueError, TypeError):
+        return False
 
 
-def _detect_manifest_type(content: str, artifact_path: str) -> str | None:
-    """Detect which type of dependency manifest we're dealing with.
+# ---------------------------------------------------------------------------
+# Manifest file detection
+# ---------------------------------------------------------------------------
 
-    Args:
-        content: File content.
-        artifact_path: File path.
+_MANIFEST_PARSERS: dict[str, Any] = {
+    "requirements.txt": _parse_requirements_txt,
+    "requirements-dev.txt": _parse_requirements_txt,
+    "requirements-lock.txt": _parse_requirements_txt,
+    "requirements_dev.txt": _parse_requirements_txt,
+    "requirements_lock.txt": _parse_requirements_txt,
+    "package.json": _parse_package_json,
+    "pyproject.toml": _parse_pyproject_toml,
+    "pipfile.lock": _parse_pipfile_lock,
+    "cargo.lock": _parse_cargo_lock,
+    "go.sum": _parse_go_sum,
+    "yarn.lock": _parse_yarn_lock,
+    "pnpm-lock.yaml": _parse_pnpm_lock,
+}
 
-    Returns:
-        One of 'requirements_txt', 'package_json', 'pyproject_toml', or None.
-    """
-    path_lower = artifact_path.lower()
 
-    if path_lower.endswith("requirements.txt") or path_lower.endswith("requirements-lock.txt"):
-        return "requirements_txt"
-    if path_lower.endswith("package.json"):
-        return "package_json"
-    if path_lower.endswith("pyproject.toml"):
-        return "pyproject_toml"
+def _detect_manifest_type(path: str, content: str) -> str | None:
+    """Detect the manifest type from file path or content heuristics."""
+    import os
 
-    # Try to detect from content patterns
-    if '"dependencies"' in content or '"devDependencies"' in content:
-        return "package_json"
-    if "[project]" in content and "dependencies" in content:
-        return "pyproject_toml"
-    # requirements.txt style: lines with package==version, git URLs, or direct URLs
-    if re.search(r"^[a-zA-Z][\w\-.]*[a-zA-Z0-9]\s*(==|>=|<=)", content, re.MULTILINE):
-        return "requirements_txt"
-    if re.search(r"^git\+|^https?://", content, re.MULTILINE):
-        return "requirements_txt"
+    basename = os.path.basename(path).lower()
+
+    # Direct filename match
+    if basename in _MANIFEST_PARSERS:
+        return basename
+
+    # requirements*.txt pattern
+    if basename.startswith("requirements") and basename.endswith(".txt"):
+        return "requirements.txt"
 
     return None
 
 
+# ---------------------------------------------------------------------------
+# DepScanScanner
+# ---------------------------------------------------------------------------
+
+
 class DepScanScanner(BaseScanner):
-    """Scanner for detecting dependency-related security risks.
+    """Scanner that analyzes dependency manifests and lockfiles for risks.
 
-    Detects vulnerable, outdated, unpinned, and potentially malicious
-    dependencies in artifact manifests. Supports:
-    - requirements.txt (Python)
-    - package.json (Node.js)
-    - pyproject.toml (Python PEP 621)
+    Detects:
+    - Known CVE vulnerabilities in pinned package versions
+    - Unpinned or wildcard version specifications
+    - Typosquatting package names (similar to popular packages)
+    - Excessive dependency counts
+    - Dependencies from untrusted sources (git URLs, direct URLs)
 
-    Optional integrations:
-    - pip-audit: For querying Python vulnerability databases
-    - safety: For checking Python dependencies against safety DB
-    - packaging: For proper PEP 440 version comparison
-
-    The scanner always functions using built-in regex and heuristic analysis,
-    with optional dependencies providing enhanced accuracy.
+    Works with regex-based parsing without requiring pip-audit or safety.
+    Optional `packaging` dependency used for accurate version comparison.
     """
-
-    def __init__(self) -> None:
-        """Initialize the DepScan scanner with lazy-loaded optional deps."""
-        self._pip_audit: Any | None = None
-        self._pip_audit_loaded = False
-        self._safety: Any | None = None
-        self._safety_loaded = False
-        self._packaging: Any | None = None
-        self._packaging_loaded = False
 
     @property
     def name(self) -> ScannerModule:
-        """Scanner module identifier."""
         return ScannerModule.DEP_SCAN
 
     @property
     def applicable_artifact_types(self) -> list[ArtifactType]:
-        """Artifact types this scanner can analyze."""
-        return [ArtifactType.SKILL, ArtifactType.MCP, ArtifactType.HOOK, ArtifactType.PLUGIN]
+        return [
+            ArtifactType.MCP,
+            ArtifactType.PLUGIN,
+            ArtifactType.SKILL,
+            ArtifactType.HOOK,
+        ]
 
     @property
     def detected_risk_ids(self) -> list[str]:
-        """Risk IDs this scanner detects."""
-        return [
-            "MCP-S4",
-            "MCP-S11",
-            "MCP-S12",
-            "PL-S3",
-            "PL-S8",
-            "SK-S7",
-        ]
+        return ["MCP-S4", "MCP-S11", "MCP-S12", "PL-S3", "PL-S8", "SK-S7"]
 
     def is_available(self) -> bool:
-        """Always available - uses regex fallback without optional deps."""
+        """Always available — works with regex-based parsing."""
         return True
-
-    def _load_pip_audit(self) -> Any | None:
-        """Lazily load pip-audit library.
-
-        Returns:
-            The pip_audit module or None if not installed.
-        """
-        if not self._pip_audit_loaded:
-            self._pip_audit_loaded = True
-            try:
-                import pip_audit
-
-                self._pip_audit = pip_audit
-            except ImportError:
-                self._pip_audit = None
-        return self._pip_audit
-
-    def _load_safety(self) -> Any | None:
-        """Lazily load safety library.
-
-        Returns:
-            The safety module or None if not installed.
-        """
-        if not self._safety_loaded:
-            self._safety_loaded = True
-            try:
-                import safety
-
-                self._safety = safety
-            except ImportError:
-                self._safety = None
-        return self._safety
-
-    def _load_packaging(self) -> Any | None:
-        """Lazily load packaging library.
-
-        Returns:
-            The packaging.version module or None if not installed.
-        """
-        if not self._packaging_loaded:
-            self._packaging_loaded = True
-            try:
-                from packaging import version
-
-                self._packaging = version
-            except ImportError:
-                self._packaging = None
-        return self._packaging
-
-    def _create_finding(
-        self,
-        risk_id: str,
-        artifact_type: ArtifactType,
-        artifact_path: str,
-        evidence: str,
-        confidence: float,
-        line: int | None = None,
-        detail: str = "",
-    ) -> ScanFinding:
-        """Create a ScanFinding from risk metadata.
-
-        Args:
-            risk_id: The risk ID to report.
-            artifact_type: Type of artifact.
-            artifact_path: Path to the artifact file.
-            evidence: The triggering text/pattern.
-            confidence: Detection confidence (0.0-1.0).
-            line: Line number where finding was detected.
-            detail: Additional detail to append to description.
-
-        Returns:
-            A fully constructed ScanFinding.
-        """
-        metadata = _RISK_METADATA[risk_id]
-
-        description = metadata["description"]
-        if detail:
-            description = f"{description} {detail}"
-
-        return ScanFinding(
-            id=risk_id,
-            artifact_type=artifact_type,
-            artifact_path=artifact_path,
-            severity_score=metadata["severity_score"],
-            severity_label=metadata["severity_label"],
-            priority=metadata["priority"],
-            gate_action=metadata["gate_action"],
-            category=metadata["category"],
-            title=metadata["title"],
-            description=description,
-            location=FindingLocation(line=line),
-            evidence=evidence[:100] if len(evidence) > 100 else evidence,
-            confidence=confidence,
-            scanner_module=ScannerModule.DEP_SCAN,
-            remediation=metadata["remediation"],
-            references=[],
-        )
-
-    def _check_known_vulnerabilities(
-        self,
-        deps: list[dict[str, Any]],
-        artifact_type: ArtifactType,
-        artifact_path: str,
-    ) -> list[ScanFinding]:
-        """Check dependencies against known vulnerable package patterns.
-
-        Args:
-            deps: Parsed dependency list.
-            artifact_type: Type of artifact.
-            artifact_path: Path to the artifact.
-
-        Returns:
-            List of findings for vulnerable dependencies.
-        """
-        findings: list[ScanFinding] = []
-        packaging_mod = self._load_packaging()
-
-        for dep in deps:
-            name_lower = dep["name"].lower()
-            if name_lower in _KNOWN_VULNERABLE_PACKAGES:
-                vuln_range, cve_info = _KNOWN_VULNERABLE_PACKAGES[name_lower]
-                dep_version = dep.get("version")
-
-                # If we have the packaging module and a version, do proper comparison
-                if packaging_mod and dep_version and dep.get("operator") == "==":
-                    try:
-                        installed = packaging_mod.Version(dep_version)
-                        # Parse the vulnerable range upper bound
-                        upper_match = re.match(r"<\s*([\d.]+)", vuln_range)
-                        if upper_match:
-                            upper = packaging_mod.Version(upper_match.group(1))
-                            if installed >= upper:
-                                continue  # Not vulnerable
-                    except Exception:
-                        pass  # Fall through to heuristic
-
-                # Without packaging or with non-pinned version, report as potential
-                risk_id = _VULN_RISK_MAP.get(artifact_type, "MCP-S4")
-                confidence = 0.95 if dep.get("pinned") else 0.85
-                evidence = f"{dep['name']}=={dep_version}" if dep_version else dep["name"]
-
-                findings.append(
-                    self._create_finding(
-                        risk_id=risk_id,
-                        artifact_type=artifact_type,
-                        artifact_path=artifact_path,
-                        evidence=evidence,
-                        confidence=confidence,
-                        line=dep.get("line"),
-                        detail=f"Known vulnerability: {cve_info}",
-                    )
-                )
-
-        return findings
-
-    def _check_unpinned_dependencies(
-        self,
-        deps: list[dict[str, Any]],
-        artifact_type: ArtifactType,
-        artifact_path: str,
-    ) -> list[ScanFinding]:
-        """Check for unpinned or wildcard version dependencies.
-
-        Args:
-            deps: Parsed dependency list.
-            artifact_type: Type of artifact.
-            artifact_path: Path to the artifact.
-
-        Returns:
-            List of findings for unpinned dependencies.
-        """
-        findings: list[ScanFinding] = []
-
-        for dep in deps:
-            is_unpinned = False
-            reason = ""
-
-            if dep.get("version") is None and dep.get("operator") is None:
-                is_unpinned = True
-                reason = "No version specified"
-            elif dep.get("wildcard"):
-                is_unpinned = True
-                reason = f"Wildcard version: {dep.get('version')}"
-            elif dep.get("version") in ("*", "latest"):
-                is_unpinned = True
-                reason = f"Unrestricted version: {dep.get('version')}"
-
-            if is_unpinned:
-                risk_id = _UNPINNED_RISK_MAP.get(artifact_type, "SK-S7")
-                findings.append(
-                    self._create_finding(
-                        risk_id=risk_id,
-                        artifact_type=artifact_type,
-                        artifact_path=artifact_path,
-                        evidence=f"{dep['name']} ({reason})",
-                        confidence=0.70,
-                        line=dep.get("line"),
-                        detail=f"Unpinned dependency: {reason}. This allows untested versions to be installed.",
-                    )
-                )
-
-        return findings
-
-    def _check_typosquatting(
-        self,
-        deps: list[dict[str, Any]],
-        artifact_type: ArtifactType,
-        artifact_path: str,
-    ) -> list[ScanFinding]:
-        """Check for potential typosquatting in dependency names.
-
-        Args:
-            deps: Parsed dependency list.
-            artifact_type: Type of artifact.
-            artifact_path: Path to the artifact.
-
-        Returns:
-            List of findings for suspected typosquatting.
-        """
-        findings: list[ScanFinding] = []
-
-        for dep in deps:
-            similar_to = _is_typosquat_candidate(dep["name"])
-            if similar_to:
-                risk_id = _TYPOSQUAT_RISK_MAP.get(artifact_type, "MCP-S12")
-                findings.append(
-                    self._create_finding(
-                        risk_id=risk_id,
-                        artifact_type=artifact_type,
-                        artifact_path=artifact_path,
-                        evidence=f"{dep['name']} (similar to '{similar_to}')",
-                        confidence=0.85,
-                        line=dep.get("line"),
-                        detail=f"Package name '{dep['name']}' is suspiciously similar to popular package '{similar_to}'.",
-                    )
-                )
-
-        return findings
-
-    def _check_excessive_dependencies(
-        self,
-        deps: list[dict[str, Any]],
-        artifact_type: ArtifactType,
-        artifact_path: str,
-    ) -> list[ScanFinding]:
-        """Check for excessive dependency count indicating supply chain risk.
-
-        Args:
-            deps: Parsed dependency list.
-            artifact_type: Type of artifact.
-            artifact_path: Path to the artifact.
-
-        Returns:
-            List of findings for excessive dependencies.
-        """
-        findings: list[ScanFinding] = []
-
-        if len(deps) > _EXCESSIVE_DEP_THRESHOLD:
-            risk_id = _VULN_RISK_MAP.get(artifact_type, "MCP-S4")
-            findings.append(
-                self._create_finding(
-                    risk_id=risk_id,
-                    artifact_type=artifact_type,
-                    artifact_path=artifact_path,
-                    evidence=f"{len(deps)} dependencies declared",
-                    confidence=0.70,
-                    line=1,
-                    detail=f"Excessive dependency count ({len(deps)} > {_EXCESSIVE_DEP_THRESHOLD}) increases supply chain attack surface.",
-                )
-            )
-
-        return findings
-
-    def _check_untrusted_sources(
-        self,
-        content: str,
-        artifact_type: ArtifactType,
-        artifact_path: str,
-    ) -> list[ScanFinding]:
-        """Check for dependencies from untrusted or unknown sources.
-
-        Detects git URLs, direct URLs, and non-standard registries.
-
-        Args:
-            content: Raw file content.
-            artifact_type: Type of artifact.
-            artifact_path: Path to the artifact.
-
-        Returns:
-            List of findings for untrusted dependency sources.
-        """
-        findings: list[ScanFinding] = []
-
-        # Patterns indicating non-registry sources
-        untrusted_patterns: list[tuple[str, re.Pattern[str]]] = [
-            ("Git URL dependency", re.compile(r"(?:git\+|git://)[^\s]+")),
-            (
-                "Direct URL dependency",
-                re.compile(
-                    r"https?://(?!pypi\.org|registry\.npmjs\.org|files\.pythonhosted\.org)[^\s]+\.(tar\.gz|whl|tgz)"
-                ),
-            ),
-            ("Private registry", re.compile(r"--index-url\s+https?://(?!pypi\.org)[^\s]+")),
-        ]
-
-        for line_num, line in enumerate(content.splitlines(), start=1):
-            stripped = line.strip()
-            if stripped.startswith("#"):
-                continue
-            for pattern_name, pattern in untrusted_patterns:
-                match = pattern.search(stripped)
-                if match:
-                    risk_id = _VULN_RISK_MAP.get(artifact_type, "MCP-S4")
-                    findings.append(
-                        self._create_finding(
-                            risk_id=risk_id,
-                            artifact_type=artifact_type,
-                            artifact_path=artifact_path,
-                            evidence=match.group(0)[:80],
-                            confidence=0.75,
-                            line=line_num,
-                            detail=f"{pattern_name} detected. Dependencies from non-standard sources bypass registry integrity checks.",
-                        )
-                    )
-                    break  # One finding per line
-
-        return findings
 
     def scan(
         self,
@@ -851,53 +689,377 @@ class DepScanScanner(BaseScanner):
         artifact_type: ArtifactType,
         artifact_path: str,
     ) -> list[ScanFinding]:
-        """Scan an artifact for dependency-related security risks.
+        """Scan dependency manifest for security risks."""
+        if not artifact_content.strip():
+            return []
 
-        Parses dependency manifests, checks for known vulnerabilities,
-        unpinned versions, typosquatting, and excessive dependencies.
+        manifest_type = _detect_manifest_type(artifact_path, artifact_content)
+        if manifest_type is None:
+            return []
 
-        Args:
-            artifact_content: The full text content of the artifact.
-            artifact_type: Classified type of the artifact.
-            artifact_path: File path of the artifact.
+        parser = _MANIFEST_PARSERS.get(manifest_type)
+        if parser is None:
+            return []
 
-        Returns:
-            List of ScanFinding objects (may be empty).
-        """
+        deps = parser(artifact_content)
         findings: list[ScanFinding] = []
 
-        # Detect manifest type
-        manifest_type = _detect_manifest_type(artifact_content, artifact_path)
-        if manifest_type is None:
-            return findings
-
-        # Parse dependencies based on manifest type
-        deps: list[dict[str, Any]] = []
-        if manifest_type == "requirements_txt":
-            deps = _parse_requirements_txt(artifact_content)
-        elif manifest_type == "package_json":
-            deps = _parse_package_json(artifact_content)
-        elif manifest_type == "pyproject_toml":
-            deps = _parse_pyproject_toml(artifact_content)
-
-        # Check for untrusted sources (operates on raw content, not parsed deps)
-        findings.extend(
-            self._check_untrusted_sources(artifact_content, artifact_type, artifact_path)
-        )
+        # Check for untrusted sources (requirements.txt specific) — runs even if deps is empty
+        if manifest_type == "requirements.txt" or manifest_type.startswith("requirements"):
+            findings.extend(
+                self._check_untrusted_sources(artifact_content, artifact_type, artifact_path)
+            )
 
         if not deps:
             return findings
 
-        # 1. Check for known vulnerable packages
-        findings.extend(self._check_known_vulnerabilities(deps, artifact_type, artifact_path))
+        # Check for known vulnerabilities
+        findings.extend(self._check_vulnerabilities(deps, artifact_type, artifact_path))
 
-        # 2. Check for unpinned/wildcard dependencies
-        findings.extend(self._check_unpinned_dependencies(deps, artifact_type, artifact_path))
+        # Check for unpinned/wildcard versions
+        findings.extend(self._check_unpinned(deps, artifact_type, artifact_path))
 
-        # 3. Check for typosquatting
+        # Check for typosquatting
         findings.extend(self._check_typosquatting(deps, artifact_type, artifact_path))
 
-        # 4. Check for excessive dependency count
-        findings.extend(self._check_excessive_dependencies(deps, artifact_type, artifact_path))
+        # Check for excessive dependencies
+        findings.extend(self._check_excessive_deps(deps, artifact_type, artifact_path))
 
         return findings
+
+    # ------------------------------------------------------------------
+    # Vulnerability checks
+    # ------------------------------------------------------------------
+
+    def _check_vulnerabilities(
+        self,
+        deps: list[dict[str, Any]],
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Check dependencies against known vulnerable versions."""
+        findings: list[ScanFinding] = []
+
+        for dep in deps:
+            name = dep["name"].lower()
+            version = dep.get("version")
+
+            if not version:
+                continue
+
+            for vuln in _KNOWN_VULNERABILITIES:
+                if vuln["name"].lower() != name:
+                    continue
+
+                if _version_less_than(version, vuln["vulnerable_below"]):
+                    risk_id = self._get_vuln_risk_id(artifact_type)
+                    findings.append(
+                        self._make_finding(
+                            risk_id=risk_id,
+                            artifact_type=artifact_type,
+                            artifact_path=artifact_path,
+                            title="Known Vulnerable Dependency",
+                            description=(
+                                f"Package '{dep['name']}' version {version} has a known "
+                                f"vulnerability ({vuln['cve']}): {vuln['description']}. "
+                                f"Update to >= {vuln['vulnerable_below']}."
+                            ),
+                            evidence=f"{dep['name']}=={version} (CVE: {vuln['cve']})",
+                            location=FindingLocation(
+                                line=dep.get("line_number", 1),
+                                section="dependencies",
+                            ),
+                            remediation=(
+                                f"Update '{dep['name']}' to version >= {vuln['vulnerable_below']}."
+                            ),
+                            confidence=0.97,
+                            severity_score=7,
+                            severity_label=SeverityLabel.HIGH,
+                            priority=Priority.P1,
+                            gate_action=GateAction.BLOCK,
+                        )
+                    )
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # Unpinned version checks
+    # ------------------------------------------------------------------
+
+    def _check_unpinned(
+        self,
+        deps: list[dict[str, Any]],
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Detect unpinned and wildcard dependency versions."""
+        findings: list[ScanFinding] = []
+
+        for dep in deps:
+            is_wildcard = dep.get("wildcard", False)
+            is_pinned = dep.get("pinned", False)
+            version = dep.get("version")
+
+            if is_wildcard:
+                risk_id = self._get_outdated_risk_id(artifact_type)
+                findings.append(
+                    self._make_finding(
+                        risk_id=risk_id,
+                        artifact_type=artifact_type,
+                        artifact_path=artifact_path,
+                        title="Unpinned Dependency Version",
+                        description=(
+                            f"Dependency '{dep['name']}' uses an unpinned/wildcard version "
+                            f"specification. This allows arbitrary versions to be installed."
+                        ),
+                        evidence=f"Unrestricted version for '{dep['name']}': {version or '*'}",
+                        location=FindingLocation(
+                            line=dep.get("line_number", 1),
+                            section="dependencies",
+                        ),
+                        remediation=f"Pin '{dep['name']}' to a specific version.",
+                        confidence=0.70,
+                        severity_score=5,
+                        severity_label=SeverityLabel.MEDIUM,
+                        priority=Priority.P2,
+                        gate_action=GateAction.WARN,
+                    )
+                )
+            elif not is_pinned and version is None:
+                # No version specified at all
+                risk_id = self._get_outdated_risk_id(artifact_type)
+                findings.append(
+                    self._make_finding(
+                        risk_id=risk_id,
+                        artifact_type=artifact_type,
+                        artifact_path=artifact_path,
+                        title="Unpinned Dependency Version",
+                        description=(
+                            f"Dependency '{dep['name']}' has no version constraint. "
+                            f"Any version may be installed, including vulnerable ones."
+                        ),
+                        evidence=f"No version specified for '{dep['name']}'",
+                        location=FindingLocation(
+                            line=dep.get("line_number", 1),
+                            section="dependencies",
+                        ),
+                        remediation=f"Pin '{dep['name']}' to a specific version (e.g., ==X.Y.Z).",
+                        confidence=0.70,
+                        severity_score=5,
+                        severity_label=SeverityLabel.MEDIUM,
+                        priority=Priority.P2,
+                        gate_action=GateAction.WARN,
+                    )
+                )
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # Typosquatting checks
+    # ------------------------------------------------------------------
+
+    def _check_typosquatting(
+        self,
+        deps: list[dict[str, Any]],
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Detect potential typosquatting package names."""
+        findings: list[ScanFinding] = []
+
+        for dep in deps:
+            similar_to = _is_typosquat_candidate(dep["name"])
+            if similar_to is not None:
+                risk_id = self._get_typosquat_risk_id(artifact_type)
+                findings.append(
+                    self._make_finding(
+                        risk_id=risk_id,
+                        artifact_type=artifact_type,
+                        artifact_path=artifact_path,
+                        title="Potential Typosquatting Package",
+                        description=(
+                            f"Package '{dep['name']}' has a name suspiciously similar to "
+                            f"the popular package '{similar_to}'. This may be a "
+                            f"typosquatting attack."
+                        ),
+                        evidence=(
+                            f"'{dep['name']}' is similar to '{similar_to}' (edit distance ≤ 2)"
+                        ),
+                        location=FindingLocation(
+                            line=dep.get("line_number", 1),
+                            section="dependencies",
+                        ),
+                        remediation=(
+                            f"Verify that '{dep['name']}' is the intended package. "
+                            f"Did you mean '{similar_to}'?"
+                        ),
+                        confidence=0.85,
+                        severity_score=7,
+                        severity_label=SeverityLabel.HIGH,
+                        priority=Priority.P1,
+                        gate_action=GateAction.BLOCK,
+                    )
+                )
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # Excessive dependency checks
+    # ------------------------------------------------------------------
+
+    def _check_excessive_deps(
+        self,
+        deps: list[dict[str, Any]],
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Flag manifests with an excessive number of dependencies."""
+        findings: list[ScanFinding] = []
+
+        if len(deps) > _EXCESSIVE_DEP_THRESHOLD:
+            risk_id = self._get_outdated_risk_id(artifact_type)
+            findings.append(
+                self._make_finding(
+                    risk_id=risk_id,
+                    artifact_type=artifact_type,
+                    artifact_path=artifact_path,
+                    title="Excessive Dependency Count",
+                    description=(
+                        f"Manifest declares {len(deps)} dependencies, exceeding the "
+                        f"recommended threshold of {_EXCESSIVE_DEP_THRESHOLD}. "
+                        f"Large dependency trees increase supply chain risk."
+                    ),
+                    evidence=f"{len(deps)} dependencies declared (threshold: {_EXCESSIVE_DEP_THRESHOLD})",
+                    location=FindingLocation(line=1, section="dependencies"),
+                    remediation="Review and reduce dependencies. Remove unused packages.",
+                    confidence=0.80,
+                    severity_score=5,
+                    severity_label=SeverityLabel.MEDIUM,
+                    priority=Priority.P2,
+                    gate_action=GateAction.WARN,
+                )
+            )
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # Untrusted source checks
+    # ------------------------------------------------------------------
+
+    def _check_untrusted_sources(
+        self,
+        content: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Detect dependencies installed from non-standard sources."""
+        findings: list[ScanFinding] = []
+
+        for line_num, raw_line in enumerate(content.splitlines(), start=1):
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            if _GIT_URL_RE.match(line):
+                is_git = line.lower().startswith("git+")
+                source_type = "Git URL" if is_git else "Direct URL"
+                risk_id = self._get_vuln_risk_id(artifact_type)
+                findings.append(
+                    self._make_finding(
+                        risk_id=risk_id,
+                        artifact_type=artifact_type,
+                        artifact_path=artifact_path,
+                        title=f"Dependency from {source_type}",
+                        description=(
+                            f"A dependency is installed from a non-standard source "
+                            f"({source_type}). This bypasses registry integrity checks."
+                        ),
+                        evidence=line[:200],
+                        location=FindingLocation(
+                            line=line_num,
+                            section="dependencies",
+                        ),
+                        remediation="Use official package registry versions instead of direct URLs.",
+                        confidence=0.80,
+                        severity_score=6,
+                        severity_label=SeverityLabel.MEDIUM,
+                        priority=Priority.P2,
+                        gate_action=GateAction.WARN,
+                    )
+                )
+
+        return findings
+
+    # ------------------------------------------------------------------
+    # Risk ID mapping per artifact type
+    # ------------------------------------------------------------------
+
+    def _get_vuln_risk_id(self, artifact_type: ArtifactType) -> str:
+        """Get the appropriate vulnerability risk ID for the artifact type."""
+        mapping = {
+            ArtifactType.MCP: "MCP-S4",
+            ArtifactType.PLUGIN: "PL-S3",
+            ArtifactType.SKILL: "SK-S7",
+            ArtifactType.HOOK: "MCP-S4",  # Hooks use MCP risk IDs
+        }
+        return mapping.get(artifact_type, "MCP-S4")
+
+    def _get_outdated_risk_id(self, artifact_type: ArtifactType) -> str:
+        """Get the appropriate outdated/unpinned risk ID for the artifact type."""
+        mapping = {
+            ArtifactType.MCP: "MCP-S11",
+            ArtifactType.PLUGIN: "PL-S3",
+            ArtifactType.SKILL: "SK-S7",
+            ArtifactType.HOOK: "MCP-S11",
+        }
+        return mapping.get(artifact_type, "MCP-S11")
+
+    def _get_typosquat_risk_id(self, artifact_type: ArtifactType) -> str:
+        """Get the appropriate typosquatting risk ID for the artifact type."""
+        mapping = {
+            ArtifactType.MCP: "MCP-S12",
+            ArtifactType.PLUGIN: "PL-S8",
+            ArtifactType.SKILL: "SK-S7",
+            ArtifactType.HOOK: "MCP-S12",
+        }
+        return mapping.get(artifact_type, "MCP-S12")
+
+    # ------------------------------------------------------------------
+    # Helper
+    # ------------------------------------------------------------------
+
+    def _make_finding(
+        self,
+        *,
+        risk_id: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+        title: str,
+        description: str,
+        evidence: str,
+        location: FindingLocation,
+        remediation: str,
+        confidence: float,
+        severity_score: int,
+        severity_label: SeverityLabel,
+        priority: Priority,
+        gate_action: GateAction,
+    ) -> ScanFinding:
+        """Create a ScanFinding for dependency scanning."""
+        return ScanFinding(
+            id=risk_id,
+            artifact_type=artifact_type,
+            artifact_path=artifact_path,
+            severity_score=severity_score,
+            severity_label=severity_label,
+            priority=priority,
+            gate_action=gate_action,
+            category=RiskCategory.SECURITY,
+            title=title,
+            description=description,
+            location=location,
+            evidence=evidence,
+            confidence=confidence,
+            scanner_module=ScannerModule.DEP_SCAN,
+            remediation=remediation,
+        )

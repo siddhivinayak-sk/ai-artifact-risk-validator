@@ -1,0 +1,34 @@
+{
+  "name": "hybrid-service",
+  "version": "1.0.0",
+  "transport": "stdio",
+  "description": "A file with both MCP and plugin markers",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "activationEvents": [
+    "onLanguage:python"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "hybrid.run",
+        "title": "Run Hybrid"
+      }
+    ]
+  },
+  "tools": [
+    {
+      "name": "format_code",
+      "description": "Format source code",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  ]
+}

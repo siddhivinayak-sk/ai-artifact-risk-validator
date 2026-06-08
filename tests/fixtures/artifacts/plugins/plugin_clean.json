@@ -1,0 +1,36 @@
+{
+  "name": "code-metrics",
+  "displayName": "Code Metrics Viewer",
+  "version": "1.0.0",
+  "description": "Displays code complexity and quality metrics in the editor",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "activationEvents": [
+    "onLanguage:python",
+    "onLanguage:typescript"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "codeMetrics.showMetrics",
+        "title": "Show Code Metrics"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "metricsView",
+          "name": "Code Metrics"
+        }
+      ]
+    }
+  },
+  "permissions": {
+    "filesystem": "read",
+    "network": false
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.0"
+  }
+}

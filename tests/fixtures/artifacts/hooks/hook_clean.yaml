@@ -1,0 +1,6 @@
+name: format-on-save
+description: Runs code formatter when files are saved
+eventType: fileEdited
+hookAction: runCommand
+command: "ruff format {file}"
+filePatterns: "**/*.py"

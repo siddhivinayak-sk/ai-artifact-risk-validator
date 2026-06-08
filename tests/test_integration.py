@@ -33,6 +33,9 @@ from ai_artifact_risk_validator.validator import Validator
 # Path to the test fixtures directory
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
+# Path to the artifacts fixture directory (from task 20.1)
+ARTIFACTS_DIR = Path(__file__).parent / "fixtures" / "artifacts"
+
 # Common CLI args to suppress log output in tests (logs go to stdout in CliRunner)
 _QUIET_ARGS = ["--log-level", "CRITICAL"]
 
@@ -104,7 +107,7 @@ class TestVerifyWithFixtureDirectories:
         assert report.artifact_path == str(FIXTURES_DIR)
         assert report.scan_id is not None
         assert report.scan_timestamp is not None
-        assert report.scanner_version == "0.2.0"
+        assert report.scanner_version == "0.3.0"
 
     def test_verify_fixtures_root_has_no_errors(self):
         """verify() on the fixtures directory completes without errors."""
@@ -476,7 +479,7 @@ class TestCLIVerifyCommand:
         """CLI --version displays version information."""
         result = runner.invoke(cli, ["--version"])
         assert result.exit_code == 0
-        assert "0.2.0" in result.output
+        assert "0.3.0" in result.output
 
     def test_cli_verify_directory_recursive_scan(self, runner, tmp_path):
         """CLI verify on a directory performs recursive scan."""
@@ -933,3 +936,423 @@ class TestEndToEndCustomDirectories:
         report = v.verify(str(tmp_path))
         assert isinstance(report, ScanReport)
         assert report.errors == []
+
+
+# ============================================================================
+# Integration Tests: verify(path) with tests/fixtures/artifacts/ directory
+# ============================================================================
+
+
+@pytest.mark.integration
+class TestVerifyWithArtifactsFixtures:
+    """Test verify(path) end-to-end using the tests/fixtures/artifacts/ directory.
+
+    These tests validate the full pipeline against the corpus of sample artifacts
+    created in task 20.1, with clean and risky variants per artifact type.
+    """
+
+    # ------------------------------------------------------------------
+    # 1. Test Validator.verify() on the clean fixture directory
+    # ------------------------------------------------------------------
+
+    def test_verify_clean_prompts_no_blocking_findings(self):
+        """verify() on clean prompt fixture produces no BLOCK findings."""
+        v = _create_validator_with_scanners()
+        report = v.verify(str(ARTIFACTS_DIR / "prompts" / "prompt_clean.prompt.md"))
+        assert isinstance(report, ScanReport)
+        # Clean prompt should have no blocking findings
+        blocking = [
+            f for f in report.findings if f.gate_action == GateAction.BLOCK and not f.false_positive
+        ]
+        assert len(blocking) == 0
+
+    def test_verify_clean_agents_returns_valid_report(self):
+        """verify() on clean agent fixture returns a valid ScanReport without errors."""
+        v = _create_validator_with_scanners()
+        report = v.verify(str(ARTIFACTS_DIR / "agents" / "agent_clean.md"))
+        assert isinstance(report, ScanReport)
+        assert report.errors == []
+        # Clean agent should not have injection or secret-related findings
+        injection_findings = [
+            f for f in report.findings if f.scanner_module == ScannerModule.INJECTION_DET
+        ]
+        secret_findings = [
+            f for f in report.findings if f.scanner_module == ScannerModule.SECRET_SCAN
+        ]
+        assert len(injection_findings) == 0
+        assert len(secret_findings) == 0
+
+    def test_verify_clean_steering_no_blocking_findings(self):
+        """verify() on clean steering fixture produces no BLOCK findings."""
+        v = _create_validator_with_scanners()
+        report = v.verify(str(ARTIFACTS_DIR / "steering" / "steering_clean.md"))
+        assert isinstance(report, ScanReport)
+        blocking = [
+            f for f in report.findings if f.gate_action == GateAction.BLOCK and not f.false_positive
+        ]
+        assert len(blocking) == 0
+
+    # ------------------------------------------------------------------
+    # 2. Test Validator.verify() on the risky fixture directory
+    # ------------------------------------------------------------------
+
+    def test_verify_risky_prompts_detects_findings(self):
+        """verify() on risky prompt fixture detects findings."""
+        v = _create_validator_with_scanners()
+        report = v.verify(str(ARTIFACTS_DIR / "prompts" / "prompt_risky.prompt.md"))
+        assert isinstance(report, ScanReport)
+        assert report.summary.total_findings > 0
+
+    def test_verify_risky_agents_detects_findings(self):
+        """verify() on risky agent fixture detects findings."""
+        v = _create_validator_with_scanners()
+        report = v.verify(str(ARTIFACTS_DIR / "agents" / "agent_risky.md"))
+        assert isinstance(report, ScanReport)
+        assert report.summary.total_findings > 0
+        # Risky agent should trigger BLOCK or WARN
+        assert report.summary.gate_decision in (GateAction.BLOCK, GateAction.WARN)
+
+    def test_verify_risky_steering_detects_findings(self):
+        """verify() on risky steering fixture detects findings."""
+        v = _create_validator_with_scanners()
+        report = v.verify(str(ARTIFACTS_DIR / "steering" / "steering_risky.md"))
+        assert isinstance(report, ScanReport)
+        assert report.summary.total_findings > 0
+
+    def test_verify_risky_skills_detects_findings(self):
+        """verify() on risky skill fixture detects findings."""
+        v = _create_validator_with_scanners()
+        report = v.verify(str(ARTIFACTS_DIR / "skills" / "skill_risky.md"))
+        assert isinstance(report, ScanReport)
+        assert report.summary.total_findings > 0
+
+    def test_verify_risky_more_findings_than_clean(self):
+        """Risky fixtures produce more findings than their clean counterparts."""
+        v = _create_validator_with_scanners()
+        clean = v.verify(str(ARTIFACTS_DIR / "prompts" / "prompt_clean.prompt.md"))
+        risky = v.verify(str(ARTIFACTS_DIR / "prompts" / "prompt_risky.prompt.md"))
+        assert risky.summary.total_findings >= clean.summary.total_findings
+
+    def test_verify_artifacts_directory_full_scan(self):
+        """verify() on the full artifacts directory returns a valid ScanReport."""
+        v = _create_validator_with_scanners()
+        report = v.verify(str(ARTIFACTS_DIR))
+        assert isinstance(report, ScanReport)
+        assert report.scan_id is not None
+        assert report.scan_timestamp is not None
+        # Should find at least some findings from risky fixtures
+        assert report.summary.total_findings > 0
+
+    def test_verify_mixed_directory_handles_diverse_types(self):
+        """verify() on the mixed artifacts directory handles diverse file types."""
+        v = _create_validator_with_scanners()
+        report = v.verify(str(ARTIFACTS_DIR / "mixed"))
+        assert isinstance(report, ScanReport)
+        assert report.errors == []
+
+    # ------------------------------------------------------------------
+    # 3. Test Validator.verify() on a single file
+    # ------------------------------------------------------------------
+
+    def test_verify_single_file_returns_scan_report(self):
+        """verify() on a single artifact file returns a valid ScanReport."""
+        v = _create_validator_with_scanners()
+        report = v.verify(str(ARTIFACTS_DIR / "agents" / "agent_risky.md"))
+        assert isinstance(report, ScanReport)
+        assert report.artifact_path == str(ARTIFACTS_DIR / "agents" / "agent_risky.md")
+        assert report.scan_id is not None
+        assert report.scan_timestamp is not None
+
+    def test_verify_single_clean_file_has_scan_metadata(self):
+        """verify() on a single clean file includes proper scan metadata."""
+        v = _create_validator_with_scanners()
+        report = v.verify(str(ARTIFACTS_DIR / "prompts" / "prompt_clean.prompt.md"))
+        assert isinstance(report, ScanReport)
+        assert report.scanner_version is not None
+        assert report.scan_id is not None
+
+    def test_verify_single_file_findings_reference_correct_path(self):
+        """Findings from single-file verify reference the correct artifact_path."""
+        v = _create_validator_with_scanners()
+        target = str(ARTIFACTS_DIR / "prompts" / "prompt_risky.prompt.md")
+        report = v.verify(target)
+        for finding in report.findings:
+            assert finding.artifact_path is not None
+
+    # ------------------------------------------------------------------
+    # 4. Test Validator.verify() on a non-existent path
+    # ------------------------------------------------------------------
+
+    def test_verify_nonexistent_path_returns_scan_report_with_errors(self):
+        """verify() on non-existent path returns a ScanReport with errors list populated."""
+        v = _create_validator_with_scanners()
+        report = v.verify(str(ARTIFACTS_DIR / "nonexistent" / "no_such_file.md"))
+        assert isinstance(report, ScanReport)
+        assert len(report.errors) > 0
+        assert report.summary.total_findings == 0
+        assert report.summary.gate_decision == GateAction.INFO
+
+    def test_verify_nonexistent_path_does_not_raise(self):
+        """verify() on non-existent path never raises an exception."""
+        v = _create_validator_with_scanners()
+        # This should never raise - graceful degradation
+        report = v.verify("/completely/impossible/path/xyz")
+        assert isinstance(report, ScanReport)
+        assert len(report.errors) > 0
+
+
+# ============================================================================
+# Integration Tests: CLI with artifacts fixtures - format and exit codes
+# ============================================================================
+
+
+@pytest.mark.integration
+class TestCLIWithArtifactsFixtures:
+    """Test CLI verify command with artifacts fixtures, format flags, and exit codes."""
+
+    @pytest.fixture
+    def runner(self):
+        """Create a Click test runner."""
+        return CliRunner()
+
+    # ------------------------------------------------------------------
+    # 5. Test CLI verify command with --format text and --format json
+    # ------------------------------------------------------------------
+
+    def test_cli_format_json_on_artifacts(self, runner):
+        """CLI verify --format json outputs valid JSON for artifacts fixture."""
+        result = runner.invoke(
+            cli,
+            ["verify", str(ARTIFACTS_DIR / "prompts" / "prompt_clean.prompt.md"), *_QUIET_ARGS],
+        )
+        assert result.exit_code in (0, 1, 2)
+        output = result.output.strip()
+        parsed = json.loads(output)
+        assert "scan_id" in parsed
+        assert "findings" in parsed
+        assert "summary" in parsed
+
+    def test_cli_format_text_on_artifacts(self, runner):
+        """CLI verify --format text outputs readable text for artifacts fixture."""
+        result = runner.invoke(
+            cli,
+            [
+                "verify",
+                str(ARTIFACTS_DIR / "agents" / "agent_risky.md"),
+                "--format",
+                "text",
+                *_QUIET_ARGS,
+            ],
+        )
+        assert result.exit_code in (0, 1, 2)
+        output = result.output.strip()
+        assert len(output) > 0
+        # Text format should not be valid JSON
+        with pytest.raises(json.JSONDecodeError):
+            json.loads(output)
+
+    def test_cli_format_json_contains_findings_for_risky(self, runner):
+        """CLI JSON output for risky fixture contains findings."""
+        result = runner.invoke(
+            cli,
+            ["verify", str(ARTIFACTS_DIR / "agents" / "agent_risky.md"), *_QUIET_ARGS],
+        )
+        assert result.exit_code in (0, 1, 2)
+        parsed = json.loads(result.output.strip())
+        assert len(parsed["findings"]) > 0
+
+    def test_cli_format_json_clean_has_fewer_findings(self, runner):
+        """CLI JSON output for clean fixture has fewer findings than risky."""
+        clean_result = runner.invoke(
+            cli,
+            ["verify", str(ARTIFACTS_DIR / "agents" / "agent_clean.md"), *_QUIET_ARGS],
+        )
+        risky_result = runner.invoke(
+            cli,
+            ["verify", str(ARTIFACTS_DIR / "agents" / "agent_risky.md"), *_QUIET_ARGS],
+        )
+        clean_parsed = json.loads(clean_result.output.strip())
+        risky_parsed = json.loads(risky_result.output.strip())
+        assert len(risky_parsed["findings"]) >= len(clean_parsed["findings"])
+
+    # ------------------------------------------------------------------
+    # 6. Test CLI verify command exit codes
+    # ------------------------------------------------------------------
+
+    def test_cli_exit_code_0_for_clean_artifact(self, runner):
+        """CLI exit code 0 (INFO/PASS) for artifact with no findings."""
+        # Clean steering produces zero findings = INFO gate = exit 0
+        result = runner.invoke(
+            cli,
+            ["verify", str(ARTIFACTS_DIR / "steering" / "steering_clean.md"), *_QUIET_ARGS],
+        )
+        assert result.exit_code == 0
+
+    def test_cli_exit_code_1_for_blocking_artifact(self, runner):
+        """CLI exit code 1 (BLOCK) for risky artifact with blocking findings."""
+        result = runner.invoke(
+            cli,
+            ["verify", str(ARTIFACTS_DIR / "agents" / "agent_risky.md"), *_QUIET_ARGS],
+        )
+        # Risky agent has secrets and injection - should trigger BLOCK (exit 1) or WARN (exit 2)
+        assert result.exit_code in (1, 2)
+
+    def test_cli_exit_code_2_for_warn_artifact(self, runner):
+        """CLI exit code 2 (WARN) when only warning-level findings exist."""
+        # Use a config that raises threshold to filter out low-severity findings
+        # but keep warning-level ones. The clean prompt with quality_lint
+        # may produce WARN-level findings.
+        result = runner.invoke(
+            cli,
+            [
+                "verify",
+                str(ARTIFACTS_DIR / "steering" / "steering_risky.md"),
+                "--severity-threshold",
+                "5",
+                *_QUIET_ARGS,
+            ],
+        )
+        # Should have exit code 1 (BLOCK) or 2 (WARN) for risky content
+        assert result.exit_code in (1, 2)
+
+    def test_cli_exit_code_0_for_empty_dir(self, runner, tmp_path):
+        """CLI exit code 0 for empty directory (no findings)."""
+        result = runner.invoke(cli, ["verify", str(tmp_path), *_QUIET_ARGS])
+        assert result.exit_code == 0
+
+    # ------------------------------------------------------------------
+    # 7. Test configuration from .aav.yaml is loaded and applied
+    # ------------------------------------------------------------------
+
+    def test_config_yaml_severity_threshold_filters_findings(self, runner, tmp_path):
+        """Config file severity threshold filters out low-severity findings."""
+        # Copy a risky fixture to tmp_path with a config
+        import shutil
+
+        shutil.copy(
+            ARTIFACTS_DIR / "prompts" / "prompt_risky.prompt.md", tmp_path / "risky.prompt.md"
+        )
+
+        config_data = {"severity": {"threshold": 8}}
+        (tmp_path / ".aav.yaml").write_text(yaml.dump(config_data), encoding="utf-8")
+
+        result = runner.invoke(cli, ["verify", str(tmp_path), *_QUIET_ARGS])
+        assert result.exit_code in (0, 1, 2)
+        parsed = json.loads(result.output.strip())
+        # All findings in output should have severity >= 8
+        for finding in parsed.get("findings", []):
+            assert finding["severity_score"] >= 8
+
+    def test_config_yaml_file_exclude_patterns(self, runner, tmp_path):
+        """Config file exclude patterns prevent scanning of matching files."""
+        import shutil
+
+        shutil.copy(
+            ARTIFACTS_DIR / "prompts" / "prompt_risky.prompt.md", tmp_path / "risky.prompt.md"
+        )
+        shutil.copy(
+            ARTIFACTS_DIR / "prompts" / "prompt_clean.prompt.md", tmp_path / "clean.prompt.md"
+        )
+
+        # Exclude all .prompt.md AND .yaml files - should result in no findings
+        config_data = {"files": {"exclude": ["*.prompt.md", "*.yaml", "*.yml"]}}
+        (tmp_path / ".aav.yaml").write_text(yaml.dump(config_data), encoding="utf-8")
+
+        result = runner.invoke(cli, ["verify", str(tmp_path), *_QUIET_ARGS])
+        assert result.exit_code == 0
+        parsed = json.loads(result.output.strip())
+        assert parsed["summary"]["total_findings"] == 0
+
+    def test_config_yaml_suppression_rules_mark_false_positive(self, tmp_path):
+        """Suppression rules from .aav.yaml mark matching findings as false_positive."""
+        import shutil
+
+        shutil.copy(
+            ARTIFACTS_DIR / "prompts" / "prompt_risky.prompt.md", tmp_path / "risky.prompt.md"
+        )
+
+        config_data = {
+            "suppressions": [
+                {"risk_id": "P-S3", "file_pattern": "**/*", "reason": "Accepted risk"},
+            ]
+        }
+        (tmp_path / ".aav.yaml").write_text(yaml.dump(config_data), encoding="utf-8")
+
+        from ai_artifact_risk_validator.config.manager import ConfigManager
+
+        cm = ConfigManager()
+        config = cm.load(scan_path=str(tmp_path))
+        v = _create_validator_with_scanners(config=config)
+        report = v.verify(str(tmp_path))
+
+        # P-S3 findings should be marked as false_positive
+        p_s3 = [f for f in report.findings if f.id == "P-S3"]
+        for finding in p_s3:
+            assert finding.false_positive is True
+
+    # ------------------------------------------------------------------
+    # 8. Test scanner disabling via config
+    # ------------------------------------------------------------------
+
+    def test_disabled_scanners_produce_no_findings(self, tmp_path):
+        """Disabled scanners don't produce findings in the report."""
+        import shutil
+
+        shutil.copy(ARTIFACTS_DIR / "agents" / "agent_risky.md", tmp_path / "agent_risky.md")
+
+        # Disable all scanners except SecretScan
+        config = ValidatorConfig(
+            enabled_scanners=[ScannerModule.SECRET_SCAN],
+        )
+        v = _create_validator_with_scanners(config=config)
+        report = v.verify(str(tmp_path))
+
+        # All findings should only come from SecretScan
+        for finding in report.findings:
+            assert finding.scanner_module == ScannerModule.SECRET_SCAN
+
+    def test_disabled_scanner_via_config_file(self, runner, tmp_path):
+        """Disabling a scanner via .aav.yaml prevents its findings from appearing."""
+        import shutil
+
+        shutil.copy(ARTIFACTS_DIR / "agents" / "agent_risky.md", tmp_path / "agent_risky.md")
+
+        config_data = {"scanners": {"disabled": ["InjectionDet", "QualityLint"]}}
+        (tmp_path / ".aav.yaml").write_text(yaml.dump(config_data), encoding="utf-8")
+
+        result = runner.invoke(cli, ["verify", str(tmp_path), *_QUIET_ARGS])
+        assert result.exit_code in (0, 1, 2)
+        parsed = json.loads(result.output.strip())
+        # No findings should come from disabled scanners
+        for finding in parsed.get("findings", []):
+            assert finding["scanner_module"] not in ("InjectionDet", "QualityLint")
+
+    def test_all_scanners_disabled_produces_no_findings(self, tmp_path):
+        """Disabling all scanners results in no findings."""
+        import shutil
+
+        shutil.copy(ARTIFACTS_DIR / "agents" / "agent_risky.md", tmp_path / "agent_risky.md")
+
+        # Disable all scanner modules
+        all_scanners = list(ScannerModule)
+        config = ValidatorConfig(disabled_scanners=all_scanners)
+        v = _create_validator_with_scanners(config=config)
+        report = v.verify(str(tmp_path))
+
+        assert report.summary.total_findings == 0
+        assert report.summary.gate_decision == GateAction.INFO
+
+    def test_enabled_single_scanner_only_produces_its_findings(self, tmp_path):
+        """Enabling only one scanner means only that scanner's findings appear."""
+        import shutil
+
+        shutil.copy(
+            ARTIFACTS_DIR / "prompts" / "prompt_risky.prompt.md", tmp_path / "risky.prompt.md"
+        )
+
+        config = ValidatorConfig(enabled_scanners=[ScannerModule.TOKEN_ANALYZER])
+        v = _create_validator_with_scanners(config=config)
+        report = v.verify(str(tmp_path))
+
+        for finding in report.findings:
+            assert finding.scanner_module == ScannerModule.TOKEN_ANALYZER

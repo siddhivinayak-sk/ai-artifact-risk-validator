@@ -1,0 +1,26 @@
+name: product-documentation-kb
+version: "1.0"
+description: Knowledge base for product documentation search
+
+knowledge_base:
+  source: ./docs/
+  format: markdown
+
+embedding_index:
+  model: text-embedding-3-small
+  dimensions: 1536
+  distance_metric: cosine
+
+chunking:
+  chunk_size: 512
+  chunk_overlap: 50
+  strategy: recursive_text_split
+
+vector_store:
+  type: in-memory
+  index_type: flat
+
+retrieval:
+  top_k: 5
+  min_similarity: 0.7
+  reranking: true
