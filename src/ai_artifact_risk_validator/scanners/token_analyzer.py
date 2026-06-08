@@ -9,6 +9,7 @@ import re
 import zlib
 from collections import Counter
 from datetime import datetime, timezone
+from typing import Any
 
 import tiktoken
 
@@ -720,10 +721,10 @@ class TokenAnalyzerScanner(BaseScanner):
         }
         return mapping.get(artifact_type, "P-P6")
 
-    def _get_risk_metadata(self, risk_id: str) -> dict:
+    def _get_risk_metadata(self, risk_id: str) -> dict[str, Any]:
         """Get risk metadata (severity, priority, gate_action, title) by ID."""
         # Risk metadata lookup - derived from risk definitions
-        metadata: dict[str, dict] = {
+        metadata: dict[str, dict[str, Any]] = {
             "P-P1": {
                 "severity_score": 6,
                 "severity_label": SeverityLabel.MEDIUM,

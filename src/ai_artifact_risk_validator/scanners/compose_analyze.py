@@ -12,6 +12,7 @@ and semantic similarity for deeper analysis.
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from ai_artifact_risk_validator.models import (
     ArtifactType,
@@ -187,7 +188,7 @@ _INCLUDE_PATTERNS: list[re.Pattern[str]] = [
 # Risk ID to Metadata Mapping
 # ============================================================
 
-_RISK_METADATA: dict[str, dict] = {
+_RISK_METADATA: dict[str, dict[str, Any]] = {
     "CMP-1": {
         "title": "Cross-artifact contradictions",
         "severity_score": 7,

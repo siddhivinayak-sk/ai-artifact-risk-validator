@@ -8,7 +8,7 @@ Requirements: 6.5, 6.6
 
 from __future__ import annotations
 
-DEFAULT_CONFIG: dict = {
+DEFAULT_CONFIG: dict[str, object] = {
     "log_level": "INFO",
     "severity_threshold": 1,
     "max_file_size_bytes": 10_485_760,  # 10 MB

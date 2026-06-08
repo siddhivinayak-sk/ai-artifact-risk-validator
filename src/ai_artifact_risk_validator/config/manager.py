@@ -68,7 +68,7 @@ def _get_config_schema() -> dict[str, Any]:
     try:
         from ai_artifact_risk_validator.config.schema import CONFIG_SCHEMA
 
-        return CONFIG_SCHEMA  # type: ignore[no-any-return]
+        return CONFIG_SCHEMA
     except (ImportError, AttributeError):
         # If schema module not yet available, allow any valid YAML
         return {"type": "object"}

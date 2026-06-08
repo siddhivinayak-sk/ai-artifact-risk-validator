@@ -123,7 +123,7 @@ def get_logger(name: str | None = None, **initial_context: Any) -> structlog.std
     logger: structlog.stdlib.BoundLogger = structlog.get_logger(name)
     if initial_context:
         logger = logger.bind(**initial_context)
-    return logger  # type: ignore[return-value]
+    return logger
 
 
 def bind_scan_context(

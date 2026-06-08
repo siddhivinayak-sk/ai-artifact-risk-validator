@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from typing import Any
 
 from ai_artifact_risk_validator.models import (
     ArtifactType,
@@ -205,7 +206,7 @@ _HOMOGLYPH_MAP: dict[str, str] = {
 }
 
 # Risk ID to metadata mapping
-_RISK_METADATA: dict[str, dict] = {
+_RISK_METADATA: dict[str, dict[str, Any]] = {
     "P-S1": {
         "title": "Direct Prompt Injection",
         "severity_score": 9,

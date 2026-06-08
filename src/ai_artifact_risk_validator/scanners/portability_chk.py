@@ -10,6 +10,7 @@ Operates entirely via regex-based detection — no optional dependencies require
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from ai_artifact_risk_validator.models import (
     ArtifactType,
@@ -207,7 +208,7 @@ _FALLBACK_INDICATORS = re.compile(
 # Risk metadata
 # ============================================================
 
-_RISK_METADATA: dict[str, dict] = {
+_RISK_METADATA: dict[str, dict[str, Any]] = {
     "MOD-1": {
         "title": "Model-specific token formats",
         "severity_score": 5,

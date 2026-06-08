@@ -11,6 +11,7 @@ dependency is lazy-loaded for enhanced PII detection when available.
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from ai_artifact_risk_validator.models import (
     ArtifactType,
@@ -248,7 +249,7 @@ _COMPLIANCE_SENSITIVE_DATA_PATTERN = re.compile(
 # Risk Metadata
 # ============================================================
 
-_RISK_METADATA: dict[str, dict] = {
+_RISK_METADATA: dict[str, dict[str, Any]] = {
     "REG-1": {
         "title": "Missing data residency declaration",
         "severity_score": 7,

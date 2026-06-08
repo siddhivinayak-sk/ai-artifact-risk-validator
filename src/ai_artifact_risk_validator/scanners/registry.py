@@ -138,7 +138,7 @@ class ScannerRegistry:
                     continue
 
                 module = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(module)  # type: ignore[union-attr]
+                spec.loader.exec_module(module)
 
                 # Find all BaseScanner subclasses in the module
                 for _name, obj in inspect.getmembers(module, inspect.isclass):

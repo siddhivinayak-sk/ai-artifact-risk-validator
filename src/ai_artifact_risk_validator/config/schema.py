@@ -31,7 +31,7 @@ _GATE_ACTIONS = ["BLOCK", "WARN", "INFO"]
 # All valid log levels
 _LOG_LEVELS = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
-CONFIG_SCHEMA: dict = {
+CONFIG_SCHEMA: dict[str, object] = {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "AI Artifact Risk Validator Configuration",
     "description": "Schema for .aav.yaml configuration files.",

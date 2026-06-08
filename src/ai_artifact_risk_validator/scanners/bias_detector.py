@@ -11,6 +11,7 @@ is lazy-loaded for enhanced name diversity analysis when available.
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from ai_artifact_risk_validator.models import (
     ArtifactType,
@@ -286,7 +287,7 @@ _NAME_PATTERN = re.compile(
 # Risk metadata
 # ============================================================
 
-_RISK_METADATA: dict[str, dict] = {
+_RISK_METADATA: dict[str, dict[str, Any]] = {
     "ETH-1": {
         "title": "Gendered language bias in prompts/instructions",
         "severity_score": 6,
