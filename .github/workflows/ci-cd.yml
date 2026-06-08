@@ -118,10 +118,13 @@ jobs:
       - name: Install dependencies
         run: |
           pip install pip-audit
-          pip install -e .
+          pip install .
 
       - name: Run pip-audit
-        run: pip-audit --strict --desc --skip-editable
+        run: |
+          # Generate a frozen requirements list excluding the local package
+          pip freeze --exclude ai-artifact-risk-validator > _audit_requirements.txt
+          pip-audit --requirement _audit_requirements.txt --strict --desc
 
   # ── Publish (tagged releases only) ─────────────────────────────────
   publish:
