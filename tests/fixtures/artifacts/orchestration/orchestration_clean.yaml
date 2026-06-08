@@ -1,0 +1,42 @@
+name: data-processing-pipeline
+version: "1.0"
+description: Standard ETL pipeline for data transformation
+
+workflow:
+  name: daily-etl
+  schedule: "0 2 * * *"
+
+pipeline:
+  stages:
+    - name: extract
+      step: fetch-data
+      source: s3://data-bucket/raw/
+      format: parquet
+
+    - name: transform
+      step: clean-data
+      depends_on: extract
+      operations:
+        - remove_nulls
+        - normalize_dates
+        - validate_schema
+
+    - name: load
+      step: write-output
+      depends_on: transform
+      destination: s3://data-bucket/processed/
+      format: parquet
+
+  error_handling:
+    retry_count: 3
+    retry_delay_seconds: 60
+    on_failure: notify
+
+  notifications:
+    channel: "#data-team"
+    on_success: true
+    on_failure: true
+
+dependencies:
+  - pandas>=2.0
+  - pyarrow>=12.0

@@ -1,0 +1,48 @@
+{
+  "name": "calculator-service",
+  "version": "1.0.0",
+  "transport": "stdio",
+  "description": "A simple calculator MCP service for arithmetic operations",
+  "tools": [
+    {
+      "name": "add",
+      "description": "Add two numbers together",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "number",
+            "description": "First operand"
+          },
+          "b": {
+            "type": "number",
+            "description": "Second operand"
+          }
+        },
+        "required": ["a", "b"]
+      }
+    },
+    {
+      "name": "multiply",
+      "description": "Multiply two numbers",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "a": {
+            "type": "number",
+            "description": "First operand"
+          },
+          "b": {
+            "type": "number",
+            "description": "Second operand"
+          }
+        },
+        "required": ["a", "b"]
+      }
+    }
+  ],
+  "permissions": {
+    "network": false,
+    "filesystem": false
+  }
+}

@@ -139,7 +139,11 @@ if report.summary.gate_decision.value == "BLOCK":
 
 ### CLI usage
 
+The CLI provides three commands: `verify`, `list-risks`, and `init`.
+
 ```bash
+# --- verify command ---
+
 # Scan a directory and output JSON report
 ai-artifact-validator verify ./my-artifacts
 
@@ -169,6 +173,40 @@ ai-artifact-validator verify ./my-artifacts --format html
 
 # Save HTML report to file
 ai-artifact-validator verify ./my-artifacts --format html --output report.html
+
+# --- list-risks command ---
+
+# List all 190 known risk definitions
+ai-artifact-validator list-risks
+
+# Filter by category
+ai-artifact-validator list-risks --category Security
+
+# Filter by artifact type
+ai-artifact-validator list-risks --artifact-type prompt
+
+# Filter by severity level
+ai-artifact-validator list-risks --severity Critical
+
+# Filter by scanner module
+ai-artifact-validator list-risks --scanner InjectionDet
+
+# Output as JSON
+ai-artifact-validator list-risks --category Security --format json
+
+# Combine filters
+ai-artifact-validator list-risks --artifact-type mcp --severity High --scanner CodeAudit
+
+# --- init command ---
+
+# Generate default .aav.yaml in current directory
+ai-artifact-validator init
+
+# Generate config in a specific directory
+ai-artifact-validator init --path ./my-project
+
+# Overwrite existing config file
+ai-artifact-validator init --force
 ```
 
 ### JSON report output examples

@@ -1,11 +1,14 @@
 """PermAudit scanner module for permission and access control analysis.
 
-Implements a policy engine that checks tool permissions against allowlists,
-analyzes file path patterns for dangerous access, audits network access
-declarations, and detects destructive action patterns.
+Detects overly broad permissions, sensitive file path access, unauthorized
+network connections, and destructive operations in AI artifacts using a
+policy engine with allowlists and pattern-based detection.
 """
 
+from __future__ import annotations
+
 import re
+from typing import Any
 
 from ai_artifact_risk_validator.models import (
     ArtifactType,
@@ -19,326 +22,539 @@ from ai_artifact_risk_validator.models import (
 )
 from ai_artifact_risk_validator.scanners.base import BaseScanner
 
-# ============================================================
-# Pattern Definitions
-# ============================================================
+# --- Risk metadata lookup ---
+_RISK_METADATA: dict[str, dict[str, Any]] = {
+    "SK-S1": {
+        "title": "Overly Broad Tool Permissions in Skill",
+        "severity_score": 8,
+        "severity_label": SeverityLabel.HIGH,
+        "priority": Priority.P1,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Skill declares overly broad tool permissions that exceed its stated purpose.",
+        "remediation": "Restrict tool permissions to the minimum set required. Use explicit allowlists.",
+    },
+    "SK-S3": {
+        "title": "Sensitive File Access in Skill",
+        "severity_score": 8,
+        "severity_label": SeverityLabel.HIGH,
+        "priority": Priority.P1,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Skill accesses sensitive system files or credential stores.",
+        "remediation": "Remove access to sensitive paths. Use secure APIs instead of direct file access.",
+    },
+    "SK-S6": {
+        "title": "Destructive Operations in Skill",
+        "severity_score": 9,
+        "severity_label": SeverityLabel.CRITICAL,
+        "priority": Priority.P0,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Skill contains destructive filesystem or system operations.",
+        "remediation": "Remove destructive commands. Use safe abstractions with confirmation steps.",
+    },
+    "A-S1": {
+        "title": "Overly Broad Tool Permissions in Agent",
+        "severity_score": 9,
+        "severity_label": SeverityLabel.CRITICAL,
+        "priority": Priority.P0,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Agent declares overly broad tool permissions or wildcard access.",
+        "remediation": "Apply principle of least privilege. Explicitly list required tools.",
+    },
+    "A-S2": {
+        "title": "Unrestricted Network Access in Agent",
+        "severity_score": 8,
+        "severity_label": SeverityLabel.HIGH,
+        "priority": Priority.P1,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Agent configuration allows unrestricted outbound network access.",
+        "remediation": "Restrict network access to specific domains. Use allowlists for URLs.",
+    },
+    "A-S6": {
+        "title": "Destructive Operations in Agent",
+        "severity_score": 9,
+        "severity_label": SeverityLabel.CRITICAL,
+        "priority": Priority.P0,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Agent configuration enables destructive system operations.",
+        "remediation": "Remove destructive capabilities. Require explicit user confirmation for dangerous actions.",
+    },
+    "ST-S3": {
+        "title": "Sensitive File Access in Steering",
+        "severity_score": 7,
+        "severity_label": SeverityLabel.HIGH,
+        "priority": Priority.P1,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Steering file directs access to sensitive system paths or credentials.",
+        "remediation": "Remove references to sensitive paths. Use environment variables for configuration.",
+    },
+    "ST-S4": {
+        "title": "Network Access in Steering",
+        "severity_score": 7,
+        "severity_label": SeverityLabel.HIGH,
+        "priority": Priority.P1,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Steering file directs outbound network connections.",
+        "remediation": "Remove direct network access directives. Use approved service integrations.",
+    },
+    "MCP-S7": {
+        "title": "Overly Broad MCP Tool Permissions",
+        "severity_score": 8,
+        "severity_label": SeverityLabel.HIGH,
+        "priority": Priority.P1,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "MCP server declares overly broad tool permissions or wildcard scopes.",
+        "remediation": "Restrict MCP tool permissions to minimum required scope.",
+    },
+    "MCP-S10": {
+        "title": "Destructive Operations in MCP Server",
+        "severity_score": 9,
+        "severity_label": SeverityLabel.CRITICAL,
+        "priority": Priority.P0,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "MCP server configuration enables destructive filesystem or database operations.",
+        "remediation": "Remove destructive capabilities from MCP tools. Add confirmation guards.",
+    },
+    "H-S3": {
+        "title": "Sensitive File Access in Hook",
+        "severity_score": 8,
+        "severity_label": SeverityLabel.HIGH,
+        "priority": Priority.P1,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Hook accesses sensitive system files or credential locations.",
+        "remediation": "Remove access to sensitive paths from hooks. Use secure configuration.",
+    },
+    "H-S6": {
+        "title": "Destructive Operations in Hook",
+        "severity_score": 9,
+        "severity_label": SeverityLabel.CRITICAL,
+        "priority": Priority.P0,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Hook performs destructive filesystem or system operations.",
+        "remediation": "Remove destructive commands from hooks. Use non-destructive alternatives.",
+    },
+    "I-S4": {
+        "title": "Sensitive File Access in Instructions",
+        "severity_score": 7,
+        "severity_label": SeverityLabel.HIGH,
+        "priority": Priority.P1,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Instruction file directs access to sensitive system paths.",
+        "remediation": "Remove references to sensitive file paths from instructions.",
+    },
+    "I-S5": {
+        "title": "Network Access in Instructions",
+        "severity_score": 7,
+        "severity_label": SeverityLabel.HIGH,
+        "priority": Priority.P1,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Instruction file directs unrestricted network access.",
+        "remediation": "Limit network access to approved endpoints. Use allowlists.",
+    },
+    "API-S2": {
+        "title": "Overly Broad API Schema Permissions",
+        "severity_score": 7,
+        "severity_label": SeverityLabel.HIGH,
+        "priority": Priority.P1,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "API schema declares overly broad access scopes or permissions.",
+        "remediation": "Apply principle of least privilege to API schema scopes.",
+    },
+    "OW-S2": {
+        "title": "Destructive Operations in Orchestration",
+        "severity_score": 8,
+        "severity_label": SeverityLabel.HIGH,
+        "priority": Priority.P1,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Orchestration workflow enables destructive operations without safeguards.",
+        "remediation": "Add confirmation steps before destructive operations in workflows.",
+    },
+    "M-S5": {
+        "title": "Sensitive File Access in Memory Configuration",
+        "severity_score": 7,
+        "severity_label": SeverityLabel.HIGH,
+        "priority": Priority.P1,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Memory configuration accesses sensitive system paths.",
+        "remediation": "Restrict memory file access to designated safe directories.",
+    },
+    "PL-S2": {
+        "title": "Overly Broad Plugin Permissions",
+        "severity_score": 8,
+        "severity_label": SeverityLabel.HIGH,
+        "priority": Priority.P1,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Plugin declares overly broad permissions or capabilities.",
+        "remediation": "Restrict plugin permissions to minimum required scope.",
+    },
+    "PL-S6": {
+        "title": "Destructive Operations in Plugin",
+        "severity_score": 9,
+        "severity_label": SeverityLabel.CRITICAL,
+        "priority": Priority.P0,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Plugin performs destructive filesystem or system operations.",
+        "remediation": "Remove destructive capabilities from plugins. Use safe abstractions.",
+    },
+}
 
-# Wildcard / overly permissive tool access patterns
-_WILDCARD_PERMISSION_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"\b(tools|permissions|access)\s*[:=]\s*\[?\s*[\"']?\*[\"']?\s*\]?", re.IGNORECASE),
-    re.compile(r"\ball[_\-\s]*(tools|access|permissions)\b", re.IGNORECASE),
-    re.compile(r"\b(allow|grant|enable)\s*[:=]\s*\[?\s*[\"']?\*[\"']?\s*\]?", re.IGNORECASE),
-    re.compile(r"\bpermissions?\s*[:=]\s*\[?\s*[\"']?all[\"']?\s*\]?", re.IGNORECASE),
-    re.compile(r"\b(unrestricted|unlimited)\s+(access|permissions?|tools?)\b", re.IGNORECASE),
-    re.compile(r"\btool_?types?\s*[:=]\s*\[?\s*[\"']?\*[\"']?\s*\]?", re.IGNORECASE),
+# --- Artifact type to risk ID mappings per detection category ---
+
+# Permission/policy violations
+_PERMISSION_RISK_MAP: dict[ArtifactType, str] = {
+    ArtifactType.SKILL: "SK-S1",
+    ArtifactType.AGENT: "A-S1",
+    ArtifactType.MCP: "MCP-S7",
+    ArtifactType.PLUGIN: "PL-S2",
+    ArtifactType.API_SCHEMA: "API-S2",
+    ArtifactType.STEERING: "ST-S3",
+    ArtifactType.HOOK: "H-S3",
+    ArtifactType.INSTRUCTION: "I-S4",
+    ArtifactType.MEMORY: "M-S5",
+    ArtifactType.ORCHESTRATION: "OW-S2",
+}
+
+# Sensitive file access
+_FILE_ACCESS_RISK_MAP: dict[ArtifactType, str] = {
+    ArtifactType.SKILL: "SK-S3",
+    ArtifactType.AGENT: "A-S1",
+    ArtifactType.STEERING: "ST-S3",
+    ArtifactType.MCP: "MCP-S7",
+    ArtifactType.HOOK: "H-S3",
+    ArtifactType.INSTRUCTION: "I-S4",
+    ArtifactType.MEMORY: "M-S5",
+    ArtifactType.PLUGIN: "PL-S2",
+    ArtifactType.ORCHESTRATION: "OW-S2",
+    ArtifactType.API_SCHEMA: "API-S2",
+}
+
+# Network access
+_NETWORK_RISK_MAP: dict[ArtifactType, str] = {
+    ArtifactType.SKILL: "SK-S1",
+    ArtifactType.AGENT: "A-S2",
+    ArtifactType.STEERING: "ST-S4",
+    ArtifactType.MCP: "MCP-S7",
+    ArtifactType.HOOK: "H-S3",
+    ArtifactType.INSTRUCTION: "I-S5",
+    ArtifactType.MEMORY: "M-S5",
+    ArtifactType.PLUGIN: "PL-S2",
+    ArtifactType.ORCHESTRATION: "OW-S2",
+    ArtifactType.API_SCHEMA: "API-S2",
+}
+
+# Destructive actions
+_DESTRUCTIVE_RISK_MAP: dict[ArtifactType, str] = {
+    ArtifactType.SKILL: "SK-S6",
+    ArtifactType.AGENT: "A-S6",
+    ArtifactType.STEERING: "ST-S3",
+    ArtifactType.MCP: "MCP-S10",
+    ArtifactType.HOOK: "H-S6",
+    ArtifactType.INSTRUCTION: "I-S4",
+    ArtifactType.MEMORY: "M-S5",
+    ArtifactType.PLUGIN: "PL-S6",
+    ArtifactType.ORCHESTRATION: "OW-S2",
+    ArtifactType.API_SCHEMA: "API-S2",
+}
+
+# --- Detection patterns ---
+
+# Sensitive file paths (system/credential files)
+_SENSITIVE_FILE_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
+    # System credential files
+    (
+        "/etc/passwd access",
+        re.compile(r"(?i)/etc/passwd"),
+        0.95,
+    ),
+    (
+        "/etc/shadow access",
+        re.compile(r"(?i)/etc/shadow"),
+        0.98,
+    ),
+    # SSH keys and config
+    (
+        "SSH directory access",
+        re.compile(r"(?i)(?:~/|~\\|/home/[^/]+/|%USERPROFILE%[/\\])\.ssh[/\\]?"),
+        0.95,
+    ),
+    (
+        "SSH key file access",
+        re.compile(r"(?i)(?:id_rsa|id_ed25519|id_ecdsa|authorized_keys|known_hosts)"),
+        0.90,
+    ),
+    # Credentials and secrets files
+    (
+        "Credentials file access",
+        re.compile(
+            r"(?i)(?:\.env|\.credentials|credentials\.json|service[_-]?account\.json|"
+            r"\.aws/credentials|\.netrc|\.pgpass|\.my\.cnf)"
+        ),
+        0.92,
+    ),
+    # System directories
+    (
+        "Root filesystem access",
+        re.compile(r"(?i)(?:access|read|write|open|path)\s*[=:\"']*\s*/\s*$|[\"']/[\"']"),
+        0.85,
+    ),
+    # Wildcard file access patterns
+    (
+        "Wildcard file access",
+        re.compile(r"(?i)(?:path|file|dir|folder)\s*[=:\"']*\s*(?:\*\*?/?\*|\.\*|/\*\*)"),
+        0.88,
+    ),
+    # Windows sensitive paths
+    (
+        "Windows system path access",
+        re.compile(
+            r"(?i)(?:C:\\Windows\\System32|%SystemRoot%|%WINDIR%|"
+            r"C:\\Users\\[^\\]+\\AppData)"
+        ),
+        0.85,
+    ),
+    # Kubernetes/Docker secrets
+    (
+        "Container secrets access",
+        re.compile(
+            r"(?i)(?:/var/run/secrets/kubernetes|/run/secrets/|"
+            r"docker\.sock|/var/run/docker\.sock)"
+        ),
+        0.95,
+    ),
+    # Broad root-level path access
+    (
+        "Broad path access pattern",
+        re.compile(r"""(?i)(?:["']|path\s*[=:])\s*/(?:etc|var|usr|opt|root|proc|sys)/"""),
+        0.85,
+    ),
 ]
 
-# Dangerous file path patterns
-_DANGEROUS_PATH_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"(/etc/passwd|/etc/shadow|/etc/sudoers)", re.IGNORECASE), "/etc system files"),
-    (re.compile(r"~?/?\.ssh(/|[\"'\s,\]})])", re.IGNORECASE), ".ssh directory"),
-    (re.compile(r"(/etc/|\\etc\\)", re.IGNORECASE), "/etc directory"),
-    (re.compile(r"(~/?\.aws|\.aws/credentials)", re.IGNORECASE), ".aws credentials"),
-    (re.compile(r"(~/?\.gnupg|\.gnupg/)", re.IGNORECASE), ".gnupg directory"),
-    (re.compile(r"(/var/log/|\\var\\log\\)", re.IGNORECASE), "/var/log directory"),
+# Network access patterns
+_NETWORK_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
+    # HTTP/HTTPS URLs (not documentation or example URLs)
     (
-        re.compile(r"(C:\\Windows\\System32|/usr/sbin|/usr/local/sbin)", re.IGNORECASE),
-        "system binary directories",
-    ),
-    (re.compile(r"(/root/|C:\\Users\\Administrator)", re.IGNORECASE), "root/admin home"),
-    (
-        re.compile(r"\bpath\s*[:=]\s*[\"']?(/|\.\./\.\.|[A-Z]:\\)[\"']?", re.IGNORECASE),
-        "root filesystem access",
-    ),
-    (
+        "External URL access",
         re.compile(
-            r"\b(read|write|access)\s+.{0,20}(entire|whole|full)\s+(file\s*system|disk|drive|filesystem)",
-            re.IGNORECASE,
+            r"(?i)(?:url|endpoint|host|server|api_?url|base_?url|webhook)\s*[=:\"']+\s*"
+            r"https?://[^\s\"']+",
         ),
-        "entire filesystem",
+        0.88,
     ),
-]
-
-# Network access without restriction patterns
-_UNRESTRICTED_NETWORK_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\b(url|endpoint|host)\s*[:=]\s*[\"']?\*[\"']?", re.IGNORECASE), "wildcard URL"),
+    # curl/wget commands
     (
-        re.compile(r"\b(any|all)\s+(url|endpoint|host|domain|port)s?\b", re.IGNORECASE),
-        "unrestricted network target",
-    ),
-    (
-        re.compile(r"\bnetwork\s*[:=]\s*[\"']?(unrestricted|all|\*)[\"']?", re.IGNORECASE),
-        "unrestricted network access",
-    ),
-    (
-        re.compile(r"\b(allow|permit)\s+(any|all)\s+(outbound|inbound|network)", re.IGNORECASE),
-        "permit all network",
-    ),
-    (re.compile(r"\bport\s*[:=]\s*[\"']?\*[\"']?", re.IGNORECASE), "wildcard port"),
-    (re.compile(r"\b0\.0\.0\.0\b", re.IGNORECASE), "bind all interfaces"),
-    (
+        "curl/wget command",
         re.compile(
-            r"\bno\s+(domain|url|network)\s+(restriction|filter|allowlist|whitelist)", re.IGNORECASE
+            r"(?i)(?:curl|wget)\s+(?:(?:-[^\s]*|-[^\s]*\s+[^\s-][^\s]*)\s+)*"
+            r"(?:https?://|[\"']https?://)"
         ),
-        "no domain restrictions",
+        0.92,
+    ),
+    # Fetch/request calls
+    (
+        "HTTP request call",
+        re.compile(
+            r"(?i)(?:fetch|requests?\.\s*(?:get|post|put|delete|patch)|"
+            r"http\.(?:get|post|put|delete)|axios\.|urllib)"
+        ),
+        0.85,
+    ),
+    # Socket connections
+    (
+        "Socket connection",
+        re.compile(r"(?i)(?:socket\.connect|net\.createConnection|new\s+Socket)"),
+        0.90,
+    ),
+    # DNS resolution / external hosts
+    (
+        "DNS/host resolution",
+        re.compile(r"(?i)(?:dns\.resolve|gethostbyname|nslookup|dig\s+)"),
+        0.85,
+    ),
+    # Outbound port access
+    (
+        "Outbound port access",
+        re.compile(r"(?i)(?:port|outbound|connect)\s*[=:]\s*(?:\d{2,5})"),
+        0.80,
+    ),
+    # WebSocket connections
+    (
+        "WebSocket connection",
+        re.compile(r"(?i)(?:wss?://[^\s\"']+|new\s+WebSocket|websocket\.connect)"),
+        0.88,
+    ),
+    # Network command-line tools
+    (
+        "Network CLI tool usage",
+        re.compile(r"(?i)(?:nc\s+-|netcat|nmap|telnet|ssh\s+\w)"),
+        0.90,
     ),
 ]
 
 # Destructive action patterns
-_DESTRUCTIVE_ACTION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\b(rm\s+-rf?|rmdir|del\s+/[sfq])", re.IGNORECASE), "recursive delete command"),
+_DESTRUCTIVE_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
+    # rm -rf and variants
     (
-        re.compile(r"\b(drop\s+(table|database|schema|index))\b", re.IGNORECASE),
-        "SQL drop statement",
+        "Recursive force delete (rm -rf)",
+        re.compile(r"(?i)\brm\s+(?:-[a-z]*r[a-z]*f|-[a-z]*f[a-z]*r)\b"),
+        0.98,
     ),
-    (re.compile(r"\b(truncate\s+(table|log))\b", re.IGNORECASE), "SQL truncate statement"),
-    (re.compile(r"\b(format\s+(disk|drive|volume|partition))\b", re.IGNORECASE), "disk format"),
+    # rm with force
     (
+        "Force delete (rm -f)",
+        re.compile(r"(?i)\brm\s+-[a-z]*f"),
+        0.92,
+    ),
+    # Generic rm command (excludes cases with -f or -r flags caught above)
+    (
+        "File deletion (rm)",
+        re.compile(r"(?i)\brm\s+(?!-[a-z]*[rf])(?!--)(?:[^|;&\n]+)"),
+        0.85,
+    ),
+    # Format commands
+    (
+        "Disk format command",
+        re.compile(r"(?i)\b(?:format|mkfs|fdisk)\b"),
+        0.90,
+    ),
+    # Truncate/overwrite
+    (
+        "File truncation",
+        re.compile(r"(?i)\b(?:truncate|>\s*/dev/null|\b:\s*>)"),
+        0.88,
+    ),
+    # Database destructive operations
+    (
+        "Database destructive operation",
+        re.compile(r"(?i)\b(?:DROP\s+(?:TABLE|DATABASE|SCHEMA)|TRUNCATE\s+TABLE|DELETE\s+FROM)\b"),
+        0.92,
+    ),
+    # System commands
+    (
+        "Dangerous system command",
+        re.compile(r"(?i)\b(?:shutdown|reboot|halt|poweroff|init\s+0)\b"),
+        0.95,
+    ),
+    # Kill/terminate
+    (
+        "Process kill command",
+        re.compile(r"(?i)\b(?:kill\s+-9|killall|pkill|taskkill)\b"),
+        0.85,
+    ),
+    # chmod dangerous
+    (
+        "Dangerous permission change",
+        re.compile(r"(?i)\bchmod\s+(?:777|666|a\+rwx)"),
+        0.90,
+    ),
+    # dd command (disk write)
+    (
+        "Disk write (dd)",
+        re.compile(r"(?i)\bdd\s+.*(?:of=|if=/dev/)"),
+        0.92,
+    ),
+    # Destructive file operations in code
+    (
+        "Programmatic file deletion",
         re.compile(
-            r"\b(delete|remove|destroy|wipe|purge)\s+(all|entire|\*|everything)", re.IGNORECASE
+            r"(?i)(?:os\.remove|os\.unlink|shutil\.rmtree|fs\.unlinkSync|"
+            r"fs\.rmdirSync|rimraf|del_tree|File\.delete)"
         ),
-        "mass deletion",
+        0.88,
     ),
-    (re.compile(r"\b(shutdown|reboot|halt|poweroff)\b", re.IGNORECASE), "system shutdown/reboot"),
+    # Registry deletion (Windows)
     (
-        re.compile(r"\bgit\s+(push\s+--force|reset\s+--hard)", re.IGNORECASE),
-        "destructive git operation",
-    ),
-    (re.compile(r"\bkill\s+(-9|--signal\s+KILL)", re.IGNORECASE), "force kill process"),
-]
-
-# Privilege escalation indicators
-_PRIVILEGE_ESCALATION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"\bsudo\b", re.IGNORECASE), "sudo usage"),
-    (
-        re.compile(r"\b(run|execute)\s+as\s+(root|admin|administrator|SYSTEM)", re.IGNORECASE),
-        "run as root/admin",
-    ),
-    (
-        re.compile(
-            r"\b(admin|root|superuser|administrator)\s+(access|privilege|permission|role)",
-            re.IGNORECASE,
-        ),
-        "admin privilege",
-    ),
-    (re.compile(r"\bchmod\s+[0-7]*7[0-7]*\b", re.IGNORECASE), "world-writable permissions"),
-    (re.compile(r"\bchown\s+root\b", re.IGNORECASE), "change owner to root"),
-    (re.compile(r"\bsetuid\b", re.IGNORECASE), "setuid flag"),
-    (re.compile(r"\bprivilege\s*escalat", re.IGNORECASE), "privilege escalation"),
-    (
-        re.compile(r"\belevat(e|ed|ion)\s+(privilege|permission|access)", re.IGNORECASE),
-        "elevated privileges",
-    ),
-]
-
-# Unrestricted shell/command execution patterns
-_SHELL_EXECUTION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (
-        re.compile(
-            r"\b(shell|bash|cmd|powershell)\s*[:=]\s*[\"']?(true|enabled|\*)[\"']?", re.IGNORECASE
-        ),
-        "shell access enabled",
-    ),
-    (
-        re.compile(r"\bexecute\s+(any|arbitrary)\s+(command|shell|script)", re.IGNORECASE),
-        "arbitrary command execution",
-    ),
-    (
-        re.compile(r"\b(subprocess|os\.system|exec|eval)\b.*\b(user|input|param)", re.IGNORECASE),
-        "unsafe command execution",
-    ),
-    (re.compile(r"\bcommand\s*[:=]\s*[\"']?\*[\"']?", re.IGNORECASE), "wildcard command"),
-    (
-        re.compile(
-            r"\b(shell_access|command_execution)\s*[:=]\s*[\"']?(unrestricted|all|\*|true)[\"']?",
-            re.IGNORECASE,
-        ),
-        "unrestricted shell",
-    ),
-    (
-        re.compile(r"\ballow\s+(all|any)\s+(commands?|scripts?|executab)", re.IGNORECASE),
-        "allow all commands",
-    ),
-]
-
-# Missing auth patterns (for MCP-S10)
-_MISSING_AUTH_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (
-        re.compile(
-            r"\b(auth|authentication)\s*[:=]\s*[\"']?(none|false|disabled|off)[\"']?", re.IGNORECASE
-        ),
-        "auth disabled",
-    ),
-    (re.compile(r"\bno\s*auth", re.IGNORECASE), "no auth"),
-    (re.compile(r"\btransport\s*[:=].*\b(http|ws)\b(?!s)", re.IGNORECASE), "unencrypted transport"),
-    (re.compile(r"\b(public|open)\s*(access|endpoint|api)", re.IGNORECASE), "public access"),
-]
-
-# Security bypass patterns (for I-S5)
-_SECURITY_BYPASS_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (
-        re.compile(
-            r"\b(skip|disable|bypass|ignore)\s+(security|safety|validation|auth)", re.IGNORECASE
-        ),
-        "security bypass",
-    ),
-    (
-        re.compile(r"\b(no|without)\s+(validation|verification|check|auth)", re.IGNORECASE),
-        "no validation",
-    ),
-    (
-        re.compile(
-            r"\b(override|disable)\s+(guard|guardrail|safet|filter|restrict)", re.IGNORECASE
-        ),
-        "override guardrails",
+        "Registry deletion",
+        re.compile(r"(?i)\b(?:reg\s+delete|Remove-Item\s+.*Registry)"),
+        0.92,
     ),
 ]
 
-
-# ============================================================
-# Risk ID → Artifact Type Mapping
-# ============================================================
-
-_RISK_ARTIFACT_MAP: dict[str, list[ArtifactType]] = {
-    "SK-S1": [ArtifactType.SKILL],
-    "SK-S3": [ArtifactType.SKILL],
-    "SK-S6": [ArtifactType.SKILL],
-    "A-S1": [ArtifactType.AGENT],
-    "A-S2": [ArtifactType.AGENT],
-    "A-S6": [ArtifactType.AGENT],
-    "ST-S3": [ArtifactType.STEERING],
-    "ST-S4": [ArtifactType.STEERING],
-    "MCP-S7": [ArtifactType.MCP],
-    "MCP-S10": [ArtifactType.MCP],
-    "H-S3": [ArtifactType.HOOK],
-    "H-S6": [ArtifactType.HOOK],
-    "I-S4": [ArtifactType.INSTRUCTION],
-    "I-S5": [ArtifactType.INSTRUCTION],
-    "API-S2": [ArtifactType.API_SCHEMA],
-    "OW-S2": [ArtifactType.ORCHESTRATION],
-    "M-S5": [ArtifactType.MEMORY],
-    "PL-S2": [ArtifactType.PLUGIN],
-    "PL-S6": [ArtifactType.PLUGIN],
-}
-
-# Risk metadata lookup: risk_id -> (title, severity_score, severity_label, priority, gate_action)
-_RISK_METADATA: dict[str, tuple[str, int, SeverityLabel, Priority, GateAction]] = {
-    "SK-S1": (
-        "Excessive File System Permissions",
-        8,
-        SeverityLabel.HIGH,
-        Priority.P0,
-        GateAction.BLOCK,
+# Overly broad permission patterns (policy violations)
+_PERMISSION_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
+    # Wildcard permissions
+    (
+        "Wildcard permission declaration",
+        re.compile(
+            r"""(?i)(?:permissions?|scopes?|access|capabilities?|tools?)\s*[=:\[]*\s*"""
+            r"""(?:\*|["']\*["']|all|\["?\*"?\])"""
+        ),
+        0.95,
     ),
-    "SK-S3": ("Unrestricted Network Access", 7, SeverityLabel.HIGH, Priority.P1, GateAction.BLOCK),
-    "SK-S6": (
-        "Privilege Escalation via Skill Chaining",
-        8,
-        SeverityLabel.HIGH,
-        Priority.P1,
-        GateAction.BLOCK,
+    # Admin/root/superuser access
+    (
+        "Elevated privilege declaration",
+        re.compile(
+            r"(?i)(?:role|privilege|access[_-]?level)\s*[=:\"']+\s*"
+            r"(?:admin|root|superuser|super_?admin|owner|full)"
+        ),
+        0.95,
     ),
-    "A-S1": ("Unrestricted Tool Access", 9, SeverityLabel.CRITICAL, Priority.P0, GateAction.BLOCK),
-    "A-S2": (
-        "Excessive Autonomous Action Scope",
-        8,
-        SeverityLabel.HIGH,
-        Priority.P0,
-        GateAction.BLOCK,
+    # Unrestricted filesystem
+    (
+        "Unrestricted filesystem access",
+        re.compile(
+            r"(?i)(?:file[_-]?system|fs)[_-]?(?:access|permission)\s*[=:\"']+\s*"
+            r"(?:full|all|unrestricted|read[_-]?write)"
+        ),
+        0.92,
     ),
-    "A-S6": ("Uncontrolled Resource Access", 7, SeverityLabel.HIGH, Priority.P1, GateAction.BLOCK),
-    "ST-S3": (
-        "Overly Permissive Scope Declaration",
-        6,
-        SeverityLabel.MEDIUM,
-        Priority.P2,
-        GateAction.WARN,
+    # Broad tool lists (many tools declared)
+    (
+        "Broad tool declaration",
+        re.compile(r"(?i)tools\s*[=:\[]\s*\[(?:[^\]]*,){7,}[^\]]*\]"),
+        0.82,
     ),
-    "ST-S4": (
-        "Unauthorized Capability Grant",
-        7,
-        SeverityLabel.HIGH,
-        Priority.P1,
-        GateAction.BLOCK,
+    # Execute/run any command
+    (
+        "Unrestricted command execution",
+        re.compile(
+            r"(?i)(?:execute|run|exec|shell|command)\s*[=:\"']+\s*"
+            r"(?:any|all|\*|unrestricted)"
+        ),
+        0.95,
     ),
-    "MCP-S7": (
-        "Excessive MCP Tool Permissions",
-        7,
-        SeverityLabel.HIGH,
-        Priority.P1,
-        GateAction.BLOCK,
+    # Write access to broad paths
+    (
+        "Broad write access",
+        re.compile(
+            r"(?i)(?:write|modify)[_-]?(?:access|permission|path)\s*[=:\"']+\s*"
+            r"(?:/|\\|\*|any|all|~)"
+        ),
+        0.90,
     ),
-    "MCP-S10": (
-        "Missing Authentication on MCP Transport",
-        7,
-        SeverityLabel.HIGH,
-        Priority.P1,
-        GateAction.BLOCK,
-    ),
-    "H-S3": (
-        "Overly Broad Event Trigger Scope",
-        6,
-        SeverityLabel.MEDIUM,
-        Priority.P2,
-        GateAction.WARN,
-    ),
-    "H-S6": (
-        "Uncontrolled Network Access from Hook",
-        7,
-        SeverityLabel.HIGH,
-        Priority.P1,
-        GateAction.BLOCK,
-    ),
-    "I-S4": (
-        "Excessive Permission Grants in Instructions",
-        7,
-        SeverityLabel.HIGH,
-        Priority.P1,
-        GateAction.BLOCK,
-    ),
-    "I-S5": (
-        "Instructions Disabling Security Checks",
-        8,
-        SeverityLabel.HIGH,
-        Priority.P0,
-        GateAction.BLOCK,
-    ),
-    "API-S2": (
-        "Overly Permissive API Schema",
-        7,
-        SeverityLabel.HIGH,
-        Priority.P1,
-        GateAction.BLOCK,
-    ),
-    "OW-S2": (
-        "Excessive Orchestration Privileges",
-        8,
-        SeverityLabel.HIGH,
-        Priority.P0,
-        GateAction.BLOCK,
-    ),
-    "M-S5": (
-        "Unauthorized Memory Access Permissions",
-        6,
-        SeverityLabel.MEDIUM,
-        Priority.P2,
-        GateAction.WARN,
-    ),
-    "PL-S2": ("Excessive Plugin Permissions", 7, SeverityLabel.HIGH, Priority.P1, GateAction.BLOCK),
-    "PL-S6": ("Unverified Plugin Source", 6, SeverityLabel.MEDIUM, Priority.P2, GateAction.WARN),
-}
+]
 
 
 class PermAuditScanner(BaseScanner):
-    """Scanner for permission and access control policy violations.
+    """Scanner for detecting permission violations and dangerous access patterns.
 
-    Detects overly permissive tool declarations, dangerous file path patterns,
-    unrestricted network access, destructive action capabilities, and privilege
-    escalation indicators across AI artifacts.
+    Uses multiple detection techniques:
+    1. Policy engine checking tool permissions against allowlists (highest confidence)
+    2. File path pattern analysis detecting access to sensitive system paths
+    3. Network access audit detecting outbound connections and URLs
+    4. Destructive action detection finding dangerous commands and operations
 
     Confidence bands:
-        - Policy violation (exact match): 0.95–1.0
-        - Pattern-based detection: 0.80–0.94
+    - Policy violation: 0.95–1.0
+    - Pattern-based detection: 0.80–0.94
     """
 
     @property
@@ -348,7 +564,12 @@ class PermAuditScanner(BaseScanner):
 
     @property
     def applicable_artifact_types(self) -> list[ArtifactType]:
-        """Artifact types this scanner can analyze."""
+        """Artifact types this scanner can analyze.
+
+        Applies to: Skill, Agent, Steering, MCP, Hook, Instruction,
+        Plugin, Memory, Orchestration, API Schema.
+        NOT applicable to: Prompt, SOP, RAG, Eval Harness.
+        """
         return [
             ArtifactType.SKILL,
             ArtifactType.AGENT,
@@ -364,7 +585,7 @@ class PermAuditScanner(BaseScanner):
 
     @property
     def detected_risk_ids(self) -> list[str]:
-        """Risk IDs this scanner is capable of detecting."""
+        """Risk IDs this scanner detects."""
         return [
             "SK-S1",
             "SK-S3",
@@ -387,13 +608,230 @@ class PermAuditScanner(BaseScanner):
             "PL-S6",
         ]
 
+    def _create_finding(
+        self,
+        risk_id: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+        evidence: str,
+        confidence: float,
+        line: int | None = None,
+        pattern_name: str = "",
+    ) -> ScanFinding:
+        """Create a ScanFinding from risk metadata.
+
+        Args:
+            risk_id: The risk ID to report.
+            artifact_type: Type of artifact.
+            artifact_path: Path to the artifact file.
+            evidence: The triggering text/pattern.
+            confidence: Detection confidence (0.0-1.0).
+            line: Line number where finding was detected.
+            pattern_name: Name of the pattern that matched.
+
+        Returns:
+            A fully constructed ScanFinding.
+        """
+        metadata = _RISK_METADATA[risk_id]
+
+        # Truncate evidence to avoid overly long strings
+        truncated_evidence = evidence[:80] + "..." if len(evidence) > 80 else evidence
+
+        description = metadata["description"]
+        if pattern_name:
+            description = f"{description} Detected: {pattern_name}."
+
+        return ScanFinding(
+            id=risk_id,
+            artifact_type=artifact_type,
+            artifact_path=artifact_path,
+            severity_score=metadata["severity_score"],
+            severity_label=metadata["severity_label"],
+            priority=metadata["priority"],
+            gate_action=metadata["gate_action"],
+            category=metadata["category"],
+            title=metadata["title"],
+            description=description,
+            location=FindingLocation(line=line),
+            evidence=truncated_evidence,
+            confidence=confidence,
+            scanner_module=ScannerModule.PERM_AUDIT,
+            remediation=metadata["remediation"],
+            references=[],
+        )
+
+    def _scan_permissions(
+        self,
+        content: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Check tool/permission declarations against policy.
+
+        Detects overly broad permissions, wildcard access, and elevated privileges.
+
+        Args:
+            content: Artifact content to scan.
+            artifact_type: Type of artifact.
+            artifact_path: Path to the artifact.
+
+        Returns:
+            List of findings from permission policy checks.
+        """
+        findings: list[ScanFinding] = []
+        lines = content.splitlines()
+
+        for pattern_name, pattern, confidence in _PERMISSION_PATTERNS:
+            for line_num, line in enumerate(lines, start=1):
+                for match in pattern.finditer(line):
+                    risk_id = _PERMISSION_RISK_MAP.get(artifact_type, "SK-S1")
+                    findings.append(
+                        self._create_finding(
+                            risk_id=risk_id,
+                            artifact_type=artifact_type,
+                            artifact_path=artifact_path,
+                            evidence=match.group(0),
+                            confidence=confidence,
+                            line=line_num,
+                            pattern_name=pattern_name,
+                        )
+                    )
+
+        return findings
+
+    def _scan_file_paths(
+        self,
+        content: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Analyze content for sensitive file path access.
+
+        Detects access to system credential files, SSH keys, and other
+        sensitive locations.
+
+        Args:
+            content: Artifact content to scan.
+            artifact_type: Type of artifact.
+            artifact_path: Path to the artifact.
+
+        Returns:
+            List of findings from file path analysis.
+        """
+        findings: list[ScanFinding] = []
+        lines = content.splitlines()
+
+        for pattern_name, pattern, confidence in _SENSITIVE_FILE_PATTERNS:
+            for line_num, line in enumerate(lines, start=1):
+                for match in pattern.finditer(line):
+                    risk_id = _FILE_ACCESS_RISK_MAP.get(artifact_type, "SK-S3")
+                    findings.append(
+                        self._create_finding(
+                            risk_id=risk_id,
+                            artifact_type=artifact_type,
+                            artifact_path=artifact_path,
+                            evidence=match.group(0),
+                            confidence=confidence,
+                            line=line_num,
+                            pattern_name=pattern_name,
+                        )
+                    )
+
+        return findings
+
+    def _scan_network_access(
+        self,
+        content: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Audit content for network access patterns.
+
+        Detects outbound HTTP/HTTPS calls, curl/wget usage, socket connections,
+        and other network access indicators.
+
+        Args:
+            content: Artifact content to scan.
+            artifact_type: Type of artifact.
+            artifact_path: Path to the artifact.
+
+        Returns:
+            List of findings from network access detection.
+        """
+        findings: list[ScanFinding] = []
+        lines = content.splitlines()
+
+        for pattern_name, pattern, confidence in _NETWORK_PATTERNS:
+            for line_num, line in enumerate(lines, start=1):
+                for match in pattern.finditer(line):
+                    risk_id = _NETWORK_RISK_MAP.get(artifact_type, "A-S2")
+                    findings.append(
+                        self._create_finding(
+                            risk_id=risk_id,
+                            artifact_type=artifact_type,
+                            artifact_path=artifact_path,
+                            evidence=match.group(0),
+                            confidence=confidence,
+                            line=line_num,
+                            pattern_name=pattern_name,
+                        )
+                    )
+
+        return findings
+
+    def _scan_destructive_actions(
+        self,
+        content: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Detect destructive operations in artifact content.
+
+        Detects file deletion, format commands, system shutdowns, database
+        drops, and other irreversible operations.
+
+        Args:
+            content: Artifact content to scan.
+            artifact_type: Type of artifact.
+            artifact_path: Path to the artifact.
+
+        Returns:
+            List of findings from destructive action detection.
+        """
+        findings: list[ScanFinding] = []
+        lines = content.splitlines()
+
+        for pattern_name, pattern, confidence in _DESTRUCTIVE_PATTERNS:
+            for line_num, line in enumerate(lines, start=1):
+                for match in pattern.finditer(line):
+                    risk_id = _DESTRUCTIVE_RISK_MAP.get(artifact_type, "SK-S6")
+                    findings.append(
+                        self._create_finding(
+                            risk_id=risk_id,
+                            artifact_type=artifact_type,
+                            artifact_path=artifact_path,
+                            evidence=match.group(0),
+                            confidence=confidence,
+                            line=line_num,
+                            pattern_name=pattern_name,
+                        )
+                    )
+
+        return findings
+
     def scan(
         self,
         artifact_content: str,
         artifact_type: ArtifactType,
         artifact_path: str,
     ) -> list[ScanFinding]:
-        """Scan an artifact for permission and access control issues.
+        """Scan an artifact for permission violations and dangerous access patterns.
+
+        Applies four detection strategies:
+        1. Permission policy checks (wildcard access, elevated privileges)
+        2. Sensitive file path detection (credentials, SSH, system files)
+        3. Network access audit (URLs, curl/wget, sockets)
+        4. Destructive action detection (rm -rf, format, DROP TABLE)
 
         Args:
             artifact_content: The full text content of the artifact.
@@ -401,442 +839,22 @@ class PermAuditScanner(BaseScanner):
             artifact_path: File path of the artifact.
 
         Returns:
-            List of ScanFinding objects for detected permission issues.
+            List of ScanFinding objects (may be empty).
         """
         findings: list[ScanFinding] = []
 
+        # 1. Permission/policy checks
+        findings.extend(self._scan_permissions(artifact_content, artifact_type, artifact_path))
+
+        # 2. Sensitive file path analysis
+        findings.extend(self._scan_file_paths(artifact_content, artifact_type, artifact_path))
+
+        # 3. Network access audit
+        findings.extend(self._scan_network_access(artifact_content, artifact_type, artifact_path))
+
+        # 4. Destructive action detection
         findings.extend(
-            self._check_wildcard_permissions(artifact_content, artifact_type, artifact_path)
+            self._scan_destructive_actions(artifact_content, artifact_type, artifact_path)
         )
-        findings.extend(self._check_dangerous_paths(artifact_content, artifact_type, artifact_path))
-        findings.extend(self._check_network_access(artifact_content, artifact_type, artifact_path))
-        findings.extend(
-            self._check_destructive_actions(artifact_content, artifact_type, artifact_path)
-        )
-        findings.extend(
-            self._check_privilege_escalation(artifact_content, artifact_type, artifact_path)
-        )
-        findings.extend(self._check_shell_execution(artifact_content, artifact_type, artifact_path))
-        findings.extend(self._check_missing_auth(artifact_content, artifact_type, artifact_path))
-        findings.extend(self._check_security_bypass(artifact_content, artifact_type, artifact_path))
-
-        return findings
-
-    def _get_line_number(self, content: str, match_start: int) -> int:
-        """Get 1-based line number from character offset."""
-        return content[:match_start].count("\n") + 1
-
-    def _select_risk_id(self, artifact_type: ArtifactType, category: str) -> str | None:
-        """Select the appropriate risk ID based on artifact type and detection category.
-
-        Args:
-            artifact_type: The artifact type being scanned.
-            category: The detection category (e.g., 'wildcard', 'path', 'network', 'destructive', 'escalation', 'shell', 'auth', 'bypass').
-
-        Returns:
-            The risk ID string, or None if no matching risk for this artifact type.
-        """
-        mapping: dict[ArtifactType, dict[str, str]] = {
-            ArtifactType.SKILL: {
-                "wildcard": "SK-S1",
-                "path": "SK-S1",
-                "network": "SK-S3",
-                "destructive": "SK-S6",
-                "escalation": "SK-S6",
-                "shell": "SK-S1",
-                "auth": "SK-S3",
-                "bypass": "SK-S6",
-            },
-            ArtifactType.AGENT: {
-                "wildcard": "A-S1",
-                "path": "A-S6",
-                "network": "A-S6",
-                "destructive": "A-S2",
-                "escalation": "A-S1",
-                "shell": "A-S1",
-                "auth": "A-S6",
-                "bypass": "A-S1",
-            },
-            ArtifactType.STEERING: {
-                "wildcard": "ST-S3",
-                "path": "ST-S4",
-                "network": "ST-S4",
-                "destructive": "ST-S4",
-                "escalation": "ST-S4",
-                "shell": "ST-S3",
-                "auth": "ST-S4",
-                "bypass": "ST-S4",
-            },
-            ArtifactType.MCP: {
-                "wildcard": "MCP-S7",
-                "path": "MCP-S7",
-                "network": "MCP-S7",
-                "destructive": "MCP-S7",
-                "escalation": "MCP-S7",
-                "shell": "MCP-S7",
-                "auth": "MCP-S10",
-                "bypass": "MCP-S7",
-            },
-            ArtifactType.HOOK: {
-                "wildcard": "H-S3",
-                "path": "H-S3",
-                "network": "H-S6",
-                "destructive": "H-S3",
-                "escalation": "H-S3",
-                "shell": "H-S3",
-                "auth": "H-S6",
-                "bypass": "H-S3",
-            },
-            ArtifactType.INSTRUCTION: {
-                "wildcard": "I-S4",
-                "path": "I-S4",
-                "network": "I-S4",
-                "destructive": "I-S4",
-                "escalation": "I-S4",
-                "shell": "I-S4",
-                "auth": "I-S4",
-                "bypass": "I-S5",
-            },
-            ArtifactType.PLUGIN: {
-                "wildcard": "PL-S2",
-                "path": "PL-S2",
-                "network": "PL-S2",
-                "destructive": "PL-S2",
-                "escalation": "PL-S2",
-                "shell": "PL-S2",
-                "auth": "PL-S6",
-                "bypass": "PL-S2",
-            },
-            ArtifactType.MEMORY: {
-                "wildcard": "M-S5",
-                "path": "M-S5",
-                "network": "M-S5",
-                "destructive": "M-S5",
-                "escalation": "M-S5",
-                "shell": "M-S5",
-                "auth": "M-S5",
-                "bypass": "M-S5",
-            },
-            ArtifactType.ORCHESTRATION: {
-                "wildcard": "OW-S2",
-                "path": "OW-S2",
-                "network": "OW-S2",
-                "destructive": "OW-S2",
-                "escalation": "OW-S2",
-                "shell": "OW-S2",
-                "auth": "OW-S2",
-                "bypass": "OW-S2",
-            },
-            ArtifactType.API_SCHEMA: {
-                "wildcard": "API-S2",
-                "path": "API-S2",
-                "network": "API-S2",
-                "destructive": "API-S2",
-                "escalation": "API-S2",
-                "shell": "API-S2",
-                "auth": "API-S2",
-                "bypass": "API-S2",
-            },
-        }
-
-        type_map = mapping.get(artifact_type)
-        if type_map is None:
-            return None
-        return type_map.get(category)
-
-    def _create_finding(
-        self,
-        risk_id: str,
-        artifact_type: ArtifactType,
-        artifact_path: str,
-        description: str,
-        evidence: str,
-        line: int | None,
-        confidence: float,
-        remediation: str,
-    ) -> ScanFinding:
-        """Create a ScanFinding with metadata from the risk registry lookup."""
-        meta = _RISK_METADATA[risk_id]
-        title, severity_score, severity_label, priority, gate_action = meta
-
-        return ScanFinding(
-            id=risk_id,
-            artifact_type=artifact_type,
-            artifact_path=artifact_path,
-            severity_score=severity_score,
-            severity_label=severity_label,
-            priority=priority,
-            gate_action=gate_action,
-            category=RiskCategory.SECURITY,
-            title=title,
-            description=description,
-            location=FindingLocation(line=line),
-            evidence=evidence[:200],  # Truncate evidence to reasonable length
-            confidence=confidence,
-            scanner_module=ScannerModule.PERM_AUDIT,
-            remediation=remediation,
-        )
-
-    def _check_wildcard_permissions(
-        self,
-        content: str,
-        artifact_type: ArtifactType,
-        artifact_path: str,
-    ) -> list[ScanFinding]:
-        """Detect overly permissive tool declarations (wildcard permissions, 'all' access)."""
-        findings: list[ScanFinding] = []
-
-        for pattern in _WILDCARD_PERMISSION_PATTERNS:
-            for match in pattern.finditer(content):
-                risk_id = self._select_risk_id(artifact_type, "wildcard")
-                if risk_id is None:
-                    continue
-
-                line = self._get_line_number(content, match.start())
-                findings.append(
-                    self._create_finding(
-                        risk_id=risk_id,
-                        artifact_type=artifact_type,
-                        artifact_path=artifact_path,
-                        description="Overly permissive tool/permission declaration detected. "
-                        "Wildcard or 'all' access grants violate the principle of least privilege.",
-                        evidence=match.group(0),
-                        line=line,
-                        confidence=0.95,
-                        remediation="Replace wildcard permissions with explicit allowlists. "
-                        "Define specific tools, paths, or resources that are needed.",
-                    )
-                )
-
-        return findings
-
-    def _check_dangerous_paths(
-        self,
-        content: str,
-        artifact_type: ArtifactType,
-        artifact_path: str,
-    ) -> list[ScanFinding]:
-        """Detect access to dangerous file paths (system dirs, sensitive files)."""
-        findings: list[ScanFinding] = []
-
-        for pattern, path_desc in _DANGEROUS_PATH_PATTERNS:
-            for match in pattern.finditer(content):
-                risk_id = self._select_risk_id(artifact_type, "path")
-                if risk_id is None:
-                    continue
-
-                line = self._get_line_number(content, match.start())
-                findings.append(
-                    self._create_finding(
-                        risk_id=risk_id,
-                        artifact_type=artifact_type,
-                        artifact_path=artifact_path,
-                        description=f"Access to sensitive file path detected: {path_desc}. "
-                        "Artifacts should not reference system-critical paths or sensitive directories.",
-                        evidence=match.group(0),
-                        line=line,
-                        confidence=0.90,
-                        remediation="Restrict file access to project-specific directories. "
-                        "Remove references to system paths and sensitive directories.",
-                    )
-                )
-
-        return findings
-
-    def _check_network_access(
-        self,
-        content: str,
-        artifact_type: ArtifactType,
-        artifact_path: str,
-    ) -> list[ScanFinding]:
-        """Detect unrestricted network access declarations."""
-        findings: list[ScanFinding] = []
-
-        for pattern, net_desc in _UNRESTRICTED_NETWORK_PATTERNS:
-            for match in pattern.finditer(content):
-                risk_id = self._select_risk_id(artifact_type, "network")
-                if risk_id is None:
-                    continue
-
-                line = self._get_line_number(content, match.start())
-                findings.append(
-                    self._create_finding(
-                        risk_id=risk_id,
-                        artifact_type=artifact_type,
-                        artifact_path=artifact_path,
-                        description=f"Unrestricted network access detected: {net_desc}. "
-                        "Network access should be limited to specific domains and endpoints.",
-                        evidence=match.group(0),
-                        line=line,
-                        confidence=0.90,
-                        remediation="Specify allowed domains and endpoints explicitly. "
-                        "Implement a network access allowlist.",
-                    )
-                )
-
-        return findings
-
-    def _check_destructive_actions(
-        self,
-        content: str,
-        artifact_type: ArtifactType,
-        artifact_path: str,
-    ) -> list[ScanFinding]:
-        """Detect destructive action patterns (delete, remove, drop, truncate, format)."""
-        findings: list[ScanFinding] = []
-
-        for pattern, action_desc in _DESTRUCTIVE_ACTION_PATTERNS:
-            for match in pattern.finditer(content):
-                risk_id = self._select_risk_id(artifact_type, "destructive")
-                if risk_id is None:
-                    continue
-
-                line = self._get_line_number(content, match.start())
-                findings.append(
-                    self._create_finding(
-                        risk_id=risk_id,
-                        artifact_type=artifact_type,
-                        artifact_path=artifact_path,
-                        description=f"Destructive action capability detected: {action_desc}. "
-                        "Destructive operations require confirmation gates or human-in-the-loop approval.",
-                        evidence=match.group(0),
-                        line=line,
-                        confidence=0.85,
-                        remediation="Add confirmation gates for destructive operations. "
-                        "Implement human-in-the-loop approval for irreversible actions.",
-                    )
-                )
-
-        return findings
-
-    def _check_privilege_escalation(
-        self,
-        content: str,
-        artifact_type: ArtifactType,
-        artifact_path: str,
-    ) -> list[ScanFinding]:
-        """Detect privilege escalation indicators (sudo, admin, root access)."""
-        findings: list[ScanFinding] = []
-
-        for pattern, esc_desc in _PRIVILEGE_ESCALATION_PATTERNS:
-            for match in pattern.finditer(content):
-                risk_id = self._select_risk_id(artifact_type, "escalation")
-                if risk_id is None:
-                    continue
-
-                line = self._get_line_number(content, match.start())
-                findings.append(
-                    self._create_finding(
-                        risk_id=risk_id,
-                        artifact_type=artifact_type,
-                        artifact_path=artifact_path,
-                        description=f"Privilege escalation indicator detected: {esc_desc}. "
-                        "AI artifacts should not require elevated privileges.",
-                        evidence=match.group(0),
-                        line=line,
-                        confidence=0.88,
-                        remediation="Remove privilege escalation requirements. "
-                        "Run with minimal required permissions and avoid root/admin access.",
-                    )
-                )
-
-        return findings
-
-    def _check_shell_execution(
-        self,
-        content: str,
-        artifact_type: ArtifactType,
-        artifact_path: str,
-    ) -> list[ScanFinding]:
-        """Detect unrestricted shell/command execution patterns."""
-        findings: list[ScanFinding] = []
-
-        for pattern, shell_desc in _SHELL_EXECUTION_PATTERNS:
-            for match in pattern.finditer(content):
-                risk_id = self._select_risk_id(artifact_type, "shell")
-                if risk_id is None:
-                    continue
-
-                line = self._get_line_number(content, match.start())
-                findings.append(
-                    self._create_finding(
-                        risk_id=risk_id,
-                        artifact_type=artifact_type,
-                        artifact_path=artifact_path,
-                        description=f"Unrestricted shell/command execution detected: {shell_desc}. "
-                        "Command execution should be limited to an explicit allowlist.",
-                        evidence=match.group(0),
-                        line=line,
-                        confidence=0.92,
-                        remediation="Replace unrestricted shell access with an explicit command allowlist. "
-                        "Only permit specific, well-defined commands.",
-                    )
-                )
-
-        return findings
-
-    def _check_missing_auth(
-        self,
-        content: str,
-        artifact_type: ArtifactType,
-        artifact_path: str,
-    ) -> list[ScanFinding]:
-        """Detect missing or disabled authentication on transports/endpoints."""
-        findings: list[ScanFinding] = []
-
-        for pattern, auth_desc in _MISSING_AUTH_PATTERNS:
-            for match in pattern.finditer(content):
-                risk_id = self._select_risk_id(artifact_type, "auth")
-                if risk_id is None:
-                    continue
-
-                line = self._get_line_number(content, match.start())
-                findings.append(
-                    self._create_finding(
-                        risk_id=risk_id,
-                        artifact_type=artifact_type,
-                        artifact_path=artifact_path,
-                        description=f"Missing or disabled authentication detected: {auth_desc}. "
-                        "All transport layers and endpoints should require authentication.",
-                        evidence=match.group(0),
-                        line=line,
-                        confidence=0.88,
-                        remediation="Enable authentication on all transport layers. "
-                        "Use token-based auth and validate client identity.",
-                    )
-                )
-
-        return findings
-
-    def _check_security_bypass(
-        self,
-        content: str,
-        artifact_type: ArtifactType,
-        artifact_path: str,
-    ) -> list[ScanFinding]:
-        """Detect instructions that disable or bypass security controls."""
-        findings: list[ScanFinding] = []
-
-        for pattern, bypass_desc in _SECURITY_BYPASS_PATTERNS:
-            for match in pattern.finditer(content):
-                risk_id = self._select_risk_id(artifact_type, "bypass")
-                if risk_id is None:
-                    continue
-
-                line = self._get_line_number(content, match.start())
-                findings.append(
-                    self._create_finding(
-                        risk_id=risk_id,
-                        artifact_type=artifact_type,
-                        artifact_path=artifact_path,
-                        description=f"Security bypass pattern detected: {bypass_desc}. "
-                        "Artifacts must not disable or circumvent security controls.",
-                        evidence=match.group(0),
-                        line=line,
-                        confidence=0.92,
-                        remediation="Remove security bypass instructions. "
-                        "Security controls must remain active and enforceable.",
-                    )
-                )
 
         return findings

@@ -9,6 +9,7 @@ Requirements: 16.1, 16.10
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import click
 from rich.console import Console
@@ -104,7 +105,7 @@ def list_risks(
         _output_text(risks)
 
 
-def _output_json(risks: list) -> None:
+def _output_json(risks: list[Any]) -> None:
     """Output risks as JSON to stdout."""
     output = []
     for risk in risks:
@@ -123,7 +124,7 @@ def _output_json(risks: list) -> None:
     click.echo(json.dumps(output, indent=2))
 
 
-def _output_text(risks: list) -> None:
+def _output_text(risks: list[Any]) -> None:
     """Output risks as a rich formatted table."""
     console = Console()
 

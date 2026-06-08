@@ -1,0 +1,31 @@
+name: qa-accuracy-benchmark
+version: "1.0"
+description: Evaluation harness for question-answering accuracy
+
+benchmark:
+  config:
+    model: gpt-4
+    temperature: 0.0
+    max_tokens: 500
+
+evaluation_metric:
+  - name: exact_match
+    threshold: 0.85
+  - name: f1_score
+    threshold: 0.90
+
+test_suite:
+  - id: factual-qa-001
+    input: "What is the capital of France?"
+    expected_output: "Paris"
+  - id: factual-qa-002
+    input: "What year was Python first released?"
+    expected_output: "1991"
+  - id: factual-qa-003
+    input: "What is the speed of light in m/s?"
+    expected_output: "299792458"
+
+scoring:
+  method: automated
+  report_format: json
+  pass_threshold: 0.85

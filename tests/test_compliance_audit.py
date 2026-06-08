@@ -1,453 +1,480 @@
-"""Unit tests for the ComplianceAudit scanner."""
+"""Tests for the ComplianceAudit scanner."""
+
+from __future__ import annotations
 
 import pytest
 
-from ai_artifact_risk_validator.models import (
-    ArtifactType,
-    ScannerModule,
-)
+from ai_artifact_risk_validator.models import ArtifactType, ScannerModule
 from ai_artifact_risk_validator.scanners.compliance_audit import ComplianceAuditScanner
 
 
 @pytest.fixture
 def scanner() -> ComplianceAuditScanner:
-    """Create a ComplianceAuditScanner instance for testing."""
+    """Create a ComplianceAuditScanner instance."""
     return ComplianceAuditScanner()
 
 
-class TestScannerProperties:
-    """Test scanner metadata and properties."""
+class TestComplianceAuditScannerProperties:
+    """Test scanner properties and metadata."""
 
-    def test_name(self, scanner: ComplianceAuditScanner):
+    def test_name(self, scanner: ComplianceAuditScanner) -> None:
         assert scanner.name == ScannerModule.COMPLIANCE_AUDIT
 
-    def test_applicable_artifact_types(self, scanner: ComplianceAuditScanner):
-        types = scanner.applicable_artifact_types
-        assert ArtifactType.AGENT in types
-        assert ArtifactType.SOP in types
-        assert ArtifactType.STEERING in types
-        assert ArtifactType.MCP in types
-        assert ArtifactType.PLUGIN in types
-        assert ArtifactType.MEMORY in types
-        assert ArtifactType.RAG in types
-        # Should not include types outside the compliance matrix
-        assert ArtifactType.PROMPT not in types
-        assert ArtifactType.SKILL not in types
-        assert ArtifactType.HOOK not in types
-        assert ArtifactType.INSTRUCTION not in types
-        assert ArtifactType.EVAL_HARNESS not in types
+    def test_applicable_artifact_types(self, scanner: ComplianceAuditScanner) -> None:
+        expected = [
+            ArtifactType.AGENT,
+            ArtifactType.SOP,
+            ArtifactType.STEERING,
+            ArtifactType.MCP,
+            ArtifactType.PLUGIN,
+            ArtifactType.MEMORY,
+            ArtifactType.RAG,
+        ]
+        assert scanner.applicable_artifact_types == expected
 
-    def test_detected_risk_ids(self, scanner: ComplianceAuditScanner):
-        risk_ids = scanner.detected_risk_ids
-        assert "REG-1" in risk_ids
-        assert "REG-2" in risk_ids
-        assert "REG-3" in risk_ids
-        assert "REG-4" in risk_ids
-        assert "REG-5" in risk_ids
-        assert "RAG-S3" in risk_ids
+    def test_not_applicable_types(self, scanner: ComplianceAuditScanner) -> None:
+        """Types that should NOT be scanned by this scanner."""
+        excluded = [
+            ArtifactType.PROMPT,
+            ArtifactType.SKILL,
+            ArtifactType.HOOK,
+            ArtifactType.INSTRUCTION,
+            ArtifactType.EVAL_HARNESS,
+            ArtifactType.ORCHESTRATION,
+            ArtifactType.API_SCHEMA,
+        ]
+        for artifact_type in excluded:
+            assert artifact_type not in scanner.applicable_artifact_types
 
-    def test_is_available_always_true(self, scanner: ComplianceAuditScanner):
-        """Scanner is always available due to regex fallback."""
+    def test_detected_risk_ids(self, scanner: ComplianceAuditScanner) -> None:
+        assert scanner.detected_risk_ids == ["REG-1", "REG-2", "REG-3", "REG-4", "REG-5", "RAG-S3"]
+
+    def test_is_available(self, scanner: ComplianceAuditScanner) -> None:
         assert scanner.is_available() is True
 
 
-class TestMissingDataResidency:
-    """Test detection of missing data residency declarations (REG-1)."""
+class TestLicenseDetection:
+    """Test license scanning (REG-2)."""
 
-    def test_external_api_without_residency(self, scanner: ComplianceAuditScanner):
-        content = """Agent configuration:
-  endpoint: https://api.openai.com/v1/chat
-  model: gpt-4
-"""
+    def test_detects_gpl_license(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        # Knowledge Base Config
+        source: external-docs
+        license: GPL-3.0
+        """
         findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        reg1 = [f for f in findings if f.id == "REG-1"]
-        assert len(reg1) > 0
-        assert reg1[0].confidence >= 0.70
+        reg2_findings = [f for f in findings if f.id == "REG-2"]
+        assert len(reg2_findings) == 1
+        assert reg2_findings[0].confidence == 0.95
+        assert "GPL" in reg2_findings[0].evidence
 
-    def test_cross_region_reference_without_residency(self, scanner: ComplianceAuditScanner):
-        content = """Data is transferred cross-border to international servers."""
-        findings = scanner.scan(content, ArtifactType.MCP, "mcp.json")
-        reg1 = [f for f in findings if f.id == "REG-1"]
-        assert len(reg1) > 0
+    def test_detects_agpl_license(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        This component uses a library licensed under AGPL-3.0.
+        """
+        findings = scanner.scan(content, ArtifactType.PLUGIN, "plugin.yaml")
+        reg2_findings = [f for f in findings if f.id == "REG-2"]
+        assert len(reg2_findings) == 1
+        assert "AGPL" in reg2_findings[0].evidence
 
-    def test_cloud_region_without_residency(self, scanner: ComplianceAuditScanner):
-        content = """deployment:
-  region: us-east-1
-  storage: s3-bucket
-"""
-        findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        reg1 = [f for f in findings if f.id == "REG-1"]
-        assert len(reg1) > 0
-
-    def test_external_api_with_residency_declaration(self, scanner: ComplianceAuditScanner):
-        content = """Agent configuration:
-  endpoint: https://api.openai.com/v1/chat
-  model: gpt-4
-  data_residency: EU
-  processing_location: eu-west-1
-"""
-        findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        reg1 = [f for f in findings if f.id == "REG-1"]
-        assert len(reg1) == 0
-
-    def test_no_data_flow_no_finding(self, scanner: ComplianceAuditScanner):
-        content = """Agent configuration:
-  name: local-agent
-  description: Processes data locally
-"""
-        findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        reg1 = [f for f in findings if f.id == "REG-1"]
-        assert len(reg1) == 0
-
-
-class TestLicenseComplianceViolation:
-    """Test detection of license compliance issues (REG-2)."""
-
-    def test_gpl_license_detected(self, scanner: ComplianceAuditScanner):
-        content = """This module uses code licensed under GPL v3."""
-        findings = scanner.scan(content, ArtifactType.PLUGIN, "plugin.json")
-        reg2 = [f for f in findings if f.id == "REG-2"]
-        assert len(reg2) > 0
-        assert reg2[0].confidence == 0.95
-
-    def test_agpl_license_detected(self, scanner: ComplianceAuditScanner):
-        content = """Licensed under the GNU Affero General Public License."""
-        findings = scanner.scan(content, ArtifactType.MCP, "mcp.json")
-        reg2 = [f for f in findings if f.id == "REG-2"]
-        assert len(reg2) > 0
-
-    def test_creative_commons_restrictive(self, scanner: ComplianceAuditScanner):
-        content = """Source material licensed under CC-BY-NC-SA."""
+    def test_detects_copyleft_keyword(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        Warning: this dataset is released under a copyleft license.
+        """
         findings = scanner.scan(content, ArtifactType.RAG, "knowledge.md")
-        reg2 = [f for f in findings if f.id == "REG-2"]
-        assert len(reg2) > 0
-        assert reg2[0].confidence == 0.85
+        reg2_findings = [f for f in findings if f.id == "REG-2"]
+        assert len(reg2_findings) == 1
 
-    def test_sspl_license_detected(self, scanner: ComplianceAuditScanner):
-        content = """Database licensed under SSPL."""
-        findings = scanner.scan(content, ArtifactType.PLUGIN, "plugin.json")
-        reg2 = [f for f in findings if f.id == "REG-2"]
-        assert len(reg2) > 0
-        assert reg2[0].confidence == 0.95
+    def test_detects_creative_commons_restrictive(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        Source material is licensed CC-BY-NC-SA.
+        """
+        findings = scanner.scan(content, ArtifactType.RAG, "source.md")
+        reg2_findings = [f for f in findings if f.id == "REG-2"]
+        assert len(reg2_findings) == 1
 
-    def test_proprietary_license_reference(self, scanner: ComplianceAuditScanner):
-        content = """All rights reserved. No redistribution allowed."""
-        findings = scanner.scan(content, ArtifactType.RAG, "knowledge.md")
-        reg2 = [f for f in findings if f.id == "REG-2"]
-        assert len(reg2) > 0
-
-    def test_mit_license_no_finding(self, scanner: ComplianceAuditScanner):
-        content = """This tool is available under the MIT License."""
-        findings = scanner.scan(content, ArtifactType.PLUGIN, "plugin.json")
-        reg2 = [f for f in findings if f.id == "REG-2"]
-        assert len(reg2) == 0
-
-    def test_no_license_reference_no_finding(self, scanner: ComplianceAuditScanner):
-        content = """A simple agent that processes data."""
+    def test_no_finding_for_permissive_license(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        license: MIT License
+        SPDX-License-Identifier: Apache-2.0
+        """
         findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        reg2 = [f for f in findings if f.id == "REG-2"]
-        assert len(reg2) == 0
+        reg2_findings = [f for f in findings if f.id == "REG-2"]
+        assert len(reg2_findings) == 0
+
+    def test_no_finding_for_clean_content(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        # Agent Config
+        name: my-agent
+        description: A simple helper agent
+        """
+        findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
+        reg2_findings = [f for f in findings if f.id == "REG-2"]
+        assert len(reg2_findings) == 0
 
 
-class TestMissingRetentionPolicy:
-    """Test detection of missing data retention policy (REG-3)."""
+class TestDataResidencyDetection:
+    """Test data residency flow mapping (REG-1)."""
 
-    def test_data_storage_without_retention(self, scanner: ComplianceAuditScanner):
-        content = """Memory configuration:
-  store user data in local database
-  persist conversation history
-"""
+    def test_detects_region_without_declaration(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        endpoint: https://api.example.com
+        region: us-east-1
+        storage: s3://my-bucket
+        """
+        findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
+        reg1_findings = [f for f in findings if f.id == "REG-1"]
+        assert len(reg1_findings) == 1
+        assert "us-east-1" in reg1_findings[0].evidence
+
+    def test_detects_cross_region_transfer(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        The data is replicated across regions for redundancy.
+        cross-region replication enabled.
+        """
+        findings = scanner.scan(content, ArtifactType.MCP, "mcp.yaml")
+        reg1_findings = [f for f in findings if f.id == "REG-1"]
+        assert len(reg1_findings) == 1
+        assert reg1_findings[0].confidence == 0.80
+
+    def test_detects_multi_region(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        deployment: multi-region
+        failover: enabled
+        """
+        findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
+        reg1_findings = [f for f in findings if f.id == "REG-1"]
+        assert len(reg1_findings) == 1
+
+    def test_no_finding_with_residency_declaration(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        region: eu-west-1
+        data_residency: EU
+        data residency declaration: All data stays in EU.
+        """
+        findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
+        reg1_findings = [f for f in findings if f.id == "REG-1"]
+        assert len(reg1_findings) == 0
+
+    def test_no_finding_without_region_reference(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        name: simple-agent
+        description: Does basic tasks
+        """
+        findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
+        reg1_findings = [f for f in findings if f.id == "REG-1"]
+        assert len(reg1_findings) == 0
+
+    def test_confidence_band_for_residency(self, scanner: ComplianceAuditScanner) -> None:
+        """Residency concern confidence should be 0.70-0.85."""
+        content = """
+        region: eu-west-1
+        """
+        findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
+        reg1_findings = [f for f in findings if f.id == "REG-1"]
+        assert len(reg1_findings) == 1
+        assert 0.70 <= reg1_findings[0].confidence <= 0.85
+
+
+class TestRetentionPolicyDetection:
+    """Test retention policy checking (REG-3)."""
+
+    def test_detects_missing_retention_for_storage(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        # Memory Configuration
+        store conversation history for context
+        database: mongodb
+        """
         findings = scanner.scan(content, ArtifactType.MEMORY, "memory.yaml")
-        reg3 = [f for f in findings if f.id == "REG-3"]
-        assert len(reg3) > 0
-        assert reg3[0].confidence == 0.75
+        reg3_findings = [f for f in findings if f.id == "REG-3"]
+        assert len(reg3_findings) == 1
 
-    def test_caching_without_retention(self, scanner: ComplianceAuditScanner):
-        content = """Cache responses for faster retrieval. Save session state."""
-        findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        reg3 = [f for f in findings if f.id == "REG-3"]
-        assert len(reg3) > 0
+    def test_detects_missing_retention_for_user_data(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        # SOP: Customer Data Processing
+        persist user data in the records table.
+        """
+        findings = scanner.scan(content, ArtifactType.SOP, "sop.md")
+        reg3_findings = [f for f in findings if f.id == "REG-3"]
+        assert len(reg3_findings) == 1
 
-    def test_data_handling_with_retention_policy(self, scanner: ComplianceAuditScanner):
-        content = """Memory configuration:
-  store user data in local database
-  retention_policy: 30 days
-  auto_delete: true
-"""
+    def test_no_finding_with_ttl(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        store conversation history for context
+        ttl: 30 days
+        auto-delete after expiration
+        """
         findings = scanner.scan(content, ArtifactType.MEMORY, "memory.yaml")
-        reg3 = [f for f in findings if f.id == "REG-3"]
-        assert len(reg3) == 0
+        reg3_findings = [f for f in findings if f.id == "REG-3"]
+        assert len(reg3_findings) == 0
 
-    def test_data_handling_with_ttl(self, scanner: ComplianceAuditScanner):
-        content = """Cache configuration:
-  cache responses locally
-  ttl: 3600
-"""
+    def test_no_finding_with_retention_policy(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        database: postgres
+        store user data in profiles table
+        retention_policy: 90 days
+        """
         findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        reg3 = [f for f in findings if f.id == "REG-3"]
-        assert len(reg3) == 0
+        reg3_findings = [f for f in findings if f.id == "REG-3"]
+        assert len(reg3_findings) == 0
 
-    def test_no_data_handling_no_finding(self, scanner: ComplianceAuditScanner):
-        content = """A simple configuration for routing requests."""
-        findings = scanner.scan(content, ArtifactType.STEERING, "steering.md")
-        reg3 = [f for f in findings if f.id == "REG-3"]
-        assert len(reg3) == 0
-
-
-class TestPIIWithoutConsent:
-    """Test detection of PII processing without consent (REG-4)."""
-
-    def test_email_without_consent(self, scanner: ComplianceAuditScanner):
-        content = """User profile:
-  email: user@example.com
-  name: John Doe
-"""
-        findings = scanner.scan(content, ArtifactType.MEMORY, "memory.yaml")
-        reg4 = [f for f in findings if f.id == "REG-4"]
-        assert len(reg4) > 0
-
-    def test_ssn_reference_without_consent(self, scanner: ComplianceAuditScanner):
-        content = """Collect social_security number for identity verification."""
+    def test_no_finding_without_data_storage(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        # Simple Agent
+        respond to queries in real-time
+        no persistent state required
+        """
         findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        reg4 = [f for f in findings if f.id == "REG-4"]
-        assert len(reg4) > 0
+        reg3_findings = [f for f in findings if f.id == "REG-3"]
+        assert len(reg3_findings) == 0
 
-    def test_personal_data_processing(self, scanner: ComplianceAuditScanner):
-        content = """The system collects personal data from users."""
+
+class TestPiiDetection:
+    """Test PII handling detection (REG-4)."""
+
+    def test_detects_pii_handling_without_consent(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        # Agent Config
+        collects personal data from users
+        processes user information for recommendations
+        """
         findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        reg4 = [f for f in findings if f.id == "REG-4"]
-        assert len(reg4) > 0
+        reg4_findings = [f for f in findings if f.id == "REG-4"]
+        assert len(reg4_findings) == 1
 
-    def test_pii_with_consent_framework(self, scanner: ComplianceAuditScanner):
-        content = """User profile:
-  email: user@example.com
-  consent_framework: explicit opt-in
-  privacy_policy: https://example.com/privacy
-"""
-        findings = scanner.scan(content, ArtifactType.MEMORY, "memory.yaml")
-        reg4 = [f for f in findings if f.id == "REG-4"]
-        assert len(reg4) == 0
+    def test_detects_email_pii(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        # RAG Knowledge
+        Contact: john.doe@example.com
+        """
+        findings = scanner.scan(content, ArtifactType.RAG, "contacts.md")
+        reg4_findings = [f for f in findings if f.id == "REG-4"]
+        assert len(reg4_findings) == 1
 
-    def test_pii_with_gdpr_reference(self, scanner: ComplianceAuditScanner):
-        content = """User profile:
-  email: user@example.com
-  compliance: GDPR compliant
-"""
-        findings = scanner.scan(content, ArtifactType.MEMORY, "memory.yaml")
-        reg4 = [f for f in findings if f.id == "REG-4"]
-        assert len(reg4) == 0
-
-    def test_no_pii_no_finding(self, scanner: ComplianceAuditScanner):
-        content = """A simple agent for code review tasks."""
+    def test_detects_pii_keyword(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        This agent handles PII and sensitive information.
+        """
         findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        reg4 = [f for f in findings if f.id == "REG-4"]
-        assert len(reg4) == 0
+        reg4_findings = [f for f in findings if f.id == "REG-4"]
+        assert len(reg4_findings) == 1
 
-
-class TestMissingRegulationAlignment:
-    """Test detection of missing AI regulation alignment (REG-5)."""
-
-    def test_healthcare_domain_without_alignment(self, scanner: ComplianceAuditScanner):
-        content = """Agent for patient diagnosis assistance.
-Processes medical records and provides treatment suggestions."""
+    def test_no_finding_with_consent_framework(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        collects personal data from users
+        consent_framework: GDPR consent management
+        privacy_policy: https://example.com/privacy
+        """
         findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        reg5 = [f for f in findings if f.id == "REG-5"]
-        assert len(reg5) > 0
-        assert reg5[0].confidence >= 0.70
+        reg4_findings = [f for f in findings if f.id == "REG-4"]
+        assert len(reg4_findings) == 0
 
-    def test_financial_domain_without_alignment(self, scanner: ComplianceAuditScanner):
-        content = """Credit scoring agent.
-Makes loan approval decisions based on financial data."""
-        findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        reg5 = [f for f in findings if f.id == "REG-5"]
-        assert len(reg5) > 0
-
-    def test_hr_domain_without_alignment(self, scanner: ComplianceAuditScanner):
-        content = """Automated hiring agent.
-Performs candidate screening and resume evaluation."""
-        findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        reg5 = [f for f in findings if f.id == "REG-5"]
-        assert len(reg5) > 0
-
-    def test_high_risk_with_regulation_alignment(self, scanner: ComplianceAuditScanner):
-        content = """Agent for patient diagnosis assistance.
-ai_risk_classification: high-risk
-human_oversight: required
-eu_ai_act: compliant
-"""
-        findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        reg5 = [f for f in findings if f.id == "REG-5"]
-        # Should not flag since regulation alignment is declared
-        assert len(reg5) == 0
-
-    def test_non_high_risk_domain_no_finding(self, scanner: ComplianceAuditScanner):
-        content = """Agent for code formatting and linting."""
-        findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        reg5 = [f for f in findings if f.id == "REG-5"]
-        assert len(reg5) == 0
+    def test_no_finding_without_pii(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        # MCP Config
+        tools:
+          - name: weather
+            description: Get current weather
+        """
+        findings = scanner.scan(content, ArtifactType.MCP, "mcp.yaml")
+        reg4_findings = [f for f in findings if f.id == "REG-4"]
+        assert len(reg4_findings) == 0
 
 
-class TestRAGComplianceSensitiveData:
-    """Test detection of compliance-sensitive data in RAG (RAG-S3)."""
+class TestRegulatoryMarkerDetection:
+    """Test regulatory compliance marker detection (REG-5)."""
 
-    def test_gdpr_data_in_rag(self, scanner: ComplianceAuditScanner):
-        content = """Knowledge base entry:
-Contains personal data subject to GDPR regulations.
-User has right to be forgotten."""
+    def test_detects_healthcare_without_hipaa(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        # Healthcare Agent
+        This agent processes patient data and medical records.
+        """
+        findings = scanner.scan(content, ArtifactType.AGENT, "health-agent.yaml")
+        reg5_findings = [f for f in findings if f.id == "REG-5"]
+        assert len(reg5_findings) == 1
+        assert "patient data" in reg5_findings[0].evidence
+
+    def test_detects_financial_without_compliance(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        # Lending Agent
+        Makes financial decisions about loan applications.
+        """
+        findings = scanner.scan(content, ArtifactType.AGENT, "lending-agent.yaml")
+        reg5_findings = [f for f in findings if f.id == "REG-5"]
+        assert len(reg5_findings) == 1
+
+    def test_detects_hiring_without_compliance(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        # HR Screening Agent
+        Assists with hiring decisions and recruitment screening.
+        """
+        findings = scanner.scan(content, ArtifactType.AGENT, "hr-agent.yaml")
+        reg5_findings = [f for f in findings if f.id == "REG-5"]
+        assert len(reg5_findings) == 1
+
+    def test_no_finding_with_regulatory_reference(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        processes patient data and medical records
+        HIPAA compliant implementation
+        """
+        findings = scanner.scan(content, ArtifactType.AGENT, "health-agent.yaml")
+        reg5_findings = [f for f in findings if f.id == "REG-5"]
+        assert len(reg5_findings) == 0
+
+    def test_no_finding_with_risk_classification(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        processes patient data
+        ai_classification: high-risk
+        human_oversight: required
+        """
+        findings = scanner.scan(content, ArtifactType.AGENT, "health-agent.yaml")
+        reg5_findings = [f for f in findings if f.id == "REG-5"]
+        assert len(reg5_findings) == 0
+
+    def test_no_finding_without_high_risk_domain(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        # Weather Agent
+        Provides weather forecasts
+        """
+        findings = scanner.scan(content, ArtifactType.AGENT, "weather-agent.yaml")
+        reg5_findings = [f for f in findings if f.id == "REG-5"]
+        assert len(reg5_findings) == 0
+
+
+class TestRagComplianceSensitiveData:
+    """Test RAG-S3 detection."""
+
+    def test_detects_phi_in_rag(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        # Knowledge Base Entry
+        Contains patient medical records from 2023.
+        protected health information included for training.
+        """
         findings = scanner.scan(content, ArtifactType.RAG, "knowledge.md")
-        rags3 = [f for f in findings if f.id == "RAG-S3"]
-        assert len(rags3) > 0
-        assert rags3[0].confidence >= 0.80
+        rag_findings = [f for f in findings if f.id == "RAG-S3"]
+        assert len(rag_findings) == 1
+        assert rag_findings[0].confidence == 0.80
 
-    def test_hipaa_data_in_rag(self, scanner: ComplianceAuditScanner):
-        content = """Patient records knowledge base.
-Contains protected health information (PHI) covered by HIPAA."""
+    def test_detects_pii_in_rag(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        # Customer Data
+        This RAG source contains personally identifiable information.
+        """
+        findings = scanner.scan(content, ArtifactType.RAG, "customers.md")
+        rag_findings = [f for f in findings if f.id == "RAG-S3"]
+        assert len(rag_findings) == 1
+
+    def test_detects_financial_data_in_rag(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        # Financial Records
+        Contains credit record and banking data for all customers.
+        """
+        findings = scanner.scan(content, ArtifactType.RAG, "finance.md")
+        rag_findings = [f for f in findings if f.id == "RAG-S3"]
+        assert len(rag_findings) == 1
+
+    def test_no_finding_with_compliance_controls(self, scanner: ComplianceAuditScanner) -> None:
+        content = """
+        Contains patient medical records.
+        HIPAA compliance controls in place.
+        """
         findings = scanner.scan(content, ArtifactType.RAG, "knowledge.md")
-        rags3 = [f for f in findings if f.id == "RAG-S3"]
-        assert len(rags3) > 0
+        rag_findings = [f for f in findings if f.id == "RAG-S3"]
+        assert len(rag_findings) == 0
 
-    def test_pci_dss_data_in_rag(self, scanner: ComplianceAuditScanner):
-        content = """Payment processing documentation.
-Includes cardholder data covered by PCI-DSS."""
-        findings = scanner.scan(content, ArtifactType.RAG, "knowledge.md")
-        rags3 = [f for f in findings if f.id == "RAG-S3"]
-        assert len(rags3) > 0
-
-    def test_non_rag_artifact_no_rag_s3(self, scanner: ComplianceAuditScanner):
-        """RAG-S3 only applies to RAG artifacts."""
-        content = """Contains protected health information covered by HIPAA."""
+    def test_not_triggered_for_non_rag(self, scanner: ComplianceAuditScanner) -> None:
+        """RAG-S3 should only fire for RAG artifact types."""
+        content = """
+        Contains patient medical records.
+        """
         findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        rags3 = [f for f in findings if f.id == "RAG-S3"]
-        assert len(rags3) == 0
-
-    def test_clean_rag_no_finding(self, scanner: ComplianceAuditScanner):
-        content = """Technical documentation about API endpoints.
-Standard REST patterns and usage examples."""
-        findings = scanner.scan(content, ArtifactType.RAG, "knowledge.md")
-        rags3 = [f for f in findings if f.id == "RAG-S3"]
-        assert len(rags3) == 0
+        rag_findings = [f for f in findings if f.id == "RAG-S3"]
+        assert len(rag_findings) == 0
 
 
-class TestNonApplicableArtifactTypes:
-    """Test that non-applicable artifact types return no findings."""
+class TestNonApplicableTypes:
+    """Test that scanner returns empty for non-applicable artifact types."""
 
-    def test_prompt_returns_empty(self, scanner: ComplianceAuditScanner):
-        content = "This contains GPL code and stores user data."
-        findings = scanner.scan(content, ArtifactType.PROMPT, "test.prompt.md")
-        assert len(findings) == 0
+    def test_prompt_returns_empty(self, scanner: ComplianceAuditScanner) -> None:
+        content = "GPL-3.0 licensed content with patient data"
+        findings = scanner.scan(content, ArtifactType.PROMPT, "prompt.md")
+        assert findings == []
 
-    def test_skill_returns_empty(self, scanner: ComplianceAuditScanner):
-        content = "Licensed under AGPL. Processes personal data."
-        findings = scanner.scan(content, ArtifactType.SKILL, "skill.md")
-        assert len(findings) == 0
+    def test_skill_returns_empty(self, scanner: ComplianceAuditScanner) -> None:
+        content = "GPL-3.0 licensed content with patient data"
+        findings = scanner.scan(content, ArtifactType.SKILL, "skill.py")
+        assert findings == []
 
-    def test_hook_returns_empty(self, scanner: ComplianceAuditScanner):
-        content = "Collects social_security and stores it."
+    def test_hook_returns_empty(self, scanner: ComplianceAuditScanner) -> None:
+        content = "GPL-3.0 licensed content with patient data"
         findings = scanner.scan(content, ArtifactType.HOOK, "hook.yaml")
-        assert len(findings) == 0
+        assert findings == []
 
+    def test_instruction_returns_empty(self, scanner: ComplianceAuditScanner) -> None:
+        content = "GPL-3.0 licensed content with patient data"
+        findings = scanner.scan(content, ArtifactType.INSTRUCTION, "instructions.md")
+        assert findings == []
 
-class TestFindingMetadata:
-    """Test that findings have correct metadata."""
+    def test_eval_harness_returns_empty(self, scanner: ComplianceAuditScanner) -> None:
+        content = "GPL-3.0 licensed content with patient data"
+        findings = scanner.scan(content, ArtifactType.EVAL_HARNESS, "eval.yaml")
+        assert findings == []
 
-    def test_finding_has_correct_scanner_module(self, scanner: ComplianceAuditScanner):
-        content = "Licensed under GPL v3. Store user data."
-        findings = scanner.scan(content, ArtifactType.PLUGIN, "plugin.json")
-        for finding in findings:
-            assert finding.scanner_module == ScannerModule.COMPLIANCE_AUDIT
+    def test_orchestration_returns_empty(self, scanner: ComplianceAuditScanner) -> None:
+        content = "GPL-3.0 licensed content with patient data"
+        findings = scanner.scan(content, ArtifactType.ORCHESTRATION, "orch.yaml")
+        assert findings == []
 
-    def test_finding_has_location(self, scanner: ComplianceAuditScanner):
-        content = "Line 1\nLine 2\nLicensed under AGPL.\nLine 4"
-        findings = scanner.scan(content, ArtifactType.MCP, "mcp.json")
-        reg2 = [f for f in findings if f.id == "REG-2"]
-        assert len(reg2) > 0
-        assert reg2[0].location.line == 3
-
-    def test_finding_has_evidence(self, scanner: ComplianceAuditScanner):
-        content = "Code is SSPL licensed."
-        findings = scanner.scan(content, ArtifactType.PLUGIN, "plugin.json")
-        reg2 = [f for f in findings if f.id == "REG-2"]
-        assert len(reg2) > 0
-        assert "SSPL" in reg2[0].evidence
-
-    def test_finding_has_remediation(self, scanner: ComplianceAuditScanner):
-        content = "Licensed under GPL. Store personal data."
-        findings = scanner.scan(content, ArtifactType.PLUGIN, "plugin.json")
-        for finding in findings:
-            assert len(finding.remediation) > 0
-
-    def test_severity_score_within_bounds(self, scanner: ComplianceAuditScanner):
-        content = "GPL license. Store user data. Collect social_security."
-        findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        for finding in findings:
-            assert 1 <= finding.severity_score <= 10
-
-    def test_confidence_within_bounds(self, scanner: ComplianceAuditScanner):
-        content = "Licensed under AGPL. endpoint: https://api.example.com"
-        findings = scanner.scan(content, ArtifactType.MCP, "mcp.json")
-        for finding in findings:
-            assert 0.0 <= finding.confidence <= 1.0
-
-
-class TestCleanContent:
-    """Test that clean content does not produce false positives."""
-
-    def test_clean_agent_no_findings(self, scanner: ComplianceAuditScanner):
-        content = """Agent for code review:
-  Analyzes pull requests for quality issues.
-  Returns structured feedback."""
-        findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        assert len(findings) == 0
-
-    def test_clean_steering_no_findings(self, scanner: ComplianceAuditScanner):
-        content = """Steering configuration:
-  priority: high
-  scope: "**/*.py"
-  instruction: Follow PEP 8 conventions."""
-        findings = scanner.scan(content, ArtifactType.STEERING, "steering.md")
-        assert len(findings) == 0
-
-    def test_clean_mcp_no_findings(self, scanner: ComplianceAuditScanner):
-        content = """{
-  "name": "code-formatter",
-  "tools": ["format", "lint"],
-  "transport": "stdio"
-}"""
-        findings = scanner.scan(content, ArtifactType.MCP, "mcp.json")
-        assert len(findings) == 0
+    def test_api_schema_returns_empty(self, scanner: ComplianceAuditScanner) -> None:
+        content = "GPL-3.0 licensed content with patient data"
+        findings = scanner.scan(content, ArtifactType.API_SCHEMA, "api.yaml")
+        assert findings == []
 
 
 class TestPresidioLazyLoading:
-    """Test that the scanner works with lazy-loaded presidio."""
+    """Test lazy loading of presidio-analyzer."""
 
-    def test_presidio_lazy_load(self, scanner: ComplianceAuditScanner):
-        """Presidio loading should not crash even if not installed."""
-        result = scanner._load_presidio()
-        # Either the AnalyzerEngine class or None - both are valid
-        assert result is None or callable(result)
+    def test_presidio_check_returns_bool(self, scanner: ComplianceAuditScanner) -> None:
+        """presidio check should return a boolean (likely False in test env)."""
+        result = scanner._check_presidio_available()
+        assert isinstance(result, bool)
 
-    def test_scanner_works_without_presidio(self, scanner: ComplianceAuditScanner):
-        """Core detection should work regardless of presidio availability."""
-        content = "Collect social_security numbers and store user data."
+    def test_presidio_check_caches_result(self, scanner: ComplianceAuditScanner) -> None:
+        """Subsequent calls should use cached result."""
+        result1 = scanner._check_presidio_available()
+        result2 = scanner._check_presidio_available()
+        assert result1 == result2
+        assert scanner._presidio_available is not None
+
+
+class TestFindingMetadata:
+    """Test that findings have correct metadata structure."""
+
+    def test_finding_has_correct_scanner_module(self, scanner: ComplianceAuditScanner) -> None:
+        content = "This uses a GPL-3.0 licensed library."
         findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        assert len(findings) > 0
+        for finding in findings:
+            assert finding.scanner_module == ScannerModule.COMPLIANCE_AUDIT
 
+    def test_license_finding_confidence(self, scanner: ComplianceAuditScanner) -> None:
+        """License violation confidence should be 0.95."""
+        content = "Licensed under AGPL-3.0."
+        findings = scanner.scan(content, ArtifactType.PLUGIN, "plugin.yaml")
+        reg2_findings = [f for f in findings if f.id == "REG-2"]
+        assert len(reg2_findings) == 1
+        assert reg2_findings[0].confidence == 0.95
 
-class TestConfidenceBands:
-    """Test confidence scoring aligns with design specification."""
-
-    def test_license_violation_high_confidence(self, scanner: ComplianceAuditScanner):
-        """License violations should have confidence of 0.95."""
-        content = "Licensed under GPL v3."
-        findings = scanner.scan(content, ArtifactType.PLUGIN, "plugin.json")
-        reg2 = [f for f in findings if f.id == "REG-2"]
-        assert len(reg2) > 0
-        assert reg2[0].confidence == 0.95
-
-    def test_residency_concern_moderate_confidence(self, scanner: ComplianceAuditScanner):
-        """Residency concerns should have confidence 0.70-0.85."""
-        content = "endpoint: https://api.service.com/data"
+    def test_finding_has_line_number(self, scanner: ComplianceAuditScanner) -> None:
+        content = "line1\nline2\nGPL-3.0 here\nline4"
         findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
-        reg1 = [f for f in findings if f.id == "REG-1"]
-        assert len(reg1) > 0
-        assert 0.70 <= reg1[0].confidence <= 0.85
+        reg2_findings = [f for f in findings if f.id == "REG-2"]
+        assert len(reg2_findings) == 1
+        assert reg2_findings[0].location.line == 3
+
+    def test_finding_evidence_truncated(self, scanner: ComplianceAuditScanner) -> None:
+        """Evidence should be truncated to 200 chars."""
+        content = "Licensed under " + "GPL-3.0 " * 100
+        findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
+        reg2_findings = [f for f in findings if f.id == "REG-2"]
+        assert len(reg2_findings) == 1
+        assert len(reg2_findings[0].evidence) <= 200

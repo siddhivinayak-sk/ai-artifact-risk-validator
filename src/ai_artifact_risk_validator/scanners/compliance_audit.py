@@ -1,10 +1,11 @@
-"""ComplianceAudit scanner module for regulatory and compliance risk detection.
+"""ComplianceAudit scanner for detecting regulatory compliance risks.
 
-Detects missing compliance/privacy declarations, cross-border data flow
-references without residency controls, missing consent mechanisms, PII
-handling without data classification, missing audit trails, and license
-compliance gaps. Uses regex-based heuristics with optional presidio-analyzer
-integration for enhanced PII detection.
+Detects missing data retention policies, cross-region data transfer without
+compliance safeguards, license violations, PII handling without consent,
+and missing regulatory compliance markers.
+
+Operates primarily via regex-based detection. The optional `presidio-analyzer`
+dependency is lazy-loaded for enhanced PII detection when available.
 """
 
 from __future__ import annotations
@@ -24,7 +25,230 @@ from ai_artifact_risk_validator.models import (
 )
 from ai_artifact_risk_validator.scanners.base import BaseScanner
 
-# --- Risk metadata lookup ---
+# ============================================================
+# License Detection Patterns (REG-2)
+# ============================================================
+
+# Copyleft/restrictive license identifiers
+_COPYLEFT_LICENSE_PATTERN = re.compile(
+    r"\b(?:"
+    r"GPL(?:-?[23](?:\.\d)?)?(?:\s*(?:or\s+later|only|\+))?|"
+    r"AGPL(?:-?[23](?:\.\d)?)?|"
+    r"LGPL(?:-?[23](?:\.\d)?)?|"
+    r"SSPL|"
+    r"CC-?BY-?(?:NC|SA|ND|NC-SA|NC-ND)|"
+    r"copyleft|"
+    r"GNU\s+(?:General|Affero|Lesser)\s+Public\s+License|"
+    r"Server\s+Side\s+Public\s+License"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# License declarations (general - indicates awareness)
+_LICENSE_DECLARATION_PATTERN = re.compile(
+    r"\b(?:"
+    r"licen[sc]e[d]?\s*(?:[:=]|under)|"
+    r"SPDX-License-Identifier\s*:|"
+    r"(?:MIT|Apache|BSD|ISC|MPL|Unlicense)\s+[Ll]icen[sc]e|"
+    r"licen[sc]ed?\s+(?:under|as)|"
+    r"(?:under|subject\s+to)\s+(?:the\s+)?(?:terms\s+of\s+)?(?:the\s+)?\w+\s+licen[sc]e"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# License file references
+_LICENSE_FILE_PATTERN = re.compile(
+    r"\b(?:LICENSE|LICENCE|COPYING|NOTICE)(?:\.\w+)?\b",
+)
+
+# ============================================================
+# Data Residency / Region Patterns (REG-1)
+# ============================================================
+
+# Cloud provider region references
+_REGION_PATTERN = re.compile(
+    r"\b(?:"
+    r"us-(?:east|west|central|north|south)-\d|"
+    r"eu-(?:west|central|north|south)-\d|"
+    r"ap-(?:southeast|northeast|south|east)-\d|"
+    r"sa-east-\d|"
+    r"af-south-\d|"
+    r"me-(?:south|central)-\d|"
+    r"ca-central-\d|"
+    r"(?:us|eu|asia|global)(?:[-_](?:east|west|central|multi))?(?:\d)?|"
+    r"(?:east|west|north|south)\s*(?:us|europe|asia)|"
+    r"(?:northeurope|westeurope|eastus|westus|centralus|uksouth|ukwest|"
+    r"germanywestcentral|francecentral|japaneast|australiaeast|"
+    r"southeastasia|eastasia|brazilsouth|canadacentral|"
+    r"koreacentral|southafricanorth)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Cross-region/cross-border data transfer keywords
+_DATA_TRANSFER_PATTERN = re.compile(
+    r"\b(?:"
+    r"cross[_\-\s]?(?:region|border|boundary)|"
+    r"data[_\-\s]?(?:transfer|replication|migration|sync|export)|"
+    r"replicate[sd]?\s+(?:to|across|between)|"
+    r"transfer[s]?\s+(?:to|across|between|from)\s+(?:\w+\s+)?(?:region|zone|country|jurisdiction)|"
+    r"multi[_\-\s]?region|"
+    r"geo[_\-\s]?(?:replication|distributed|redundan)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Data residency declaration keywords (positive signal - these indicate compliance)
+_RESIDENCY_DECLARATION_PATTERN = re.compile(
+    r"\b(?:"
+    r"data[_\-\s]?residency|"
+    r"data[_\-\s]?sovereignty|"
+    r"data[_\-\s]?localization|"
+    r"processing[_\-\s]?region|"
+    r"storage[_\-\s]?region|"
+    r"data[_\-\s]?jurisdiction"
+    r")\s*(?:[:=]|is|declaration|policy)",
+    re.IGNORECASE,
+)
+
+# ============================================================
+# Retention / TTL Patterns (REG-3)
+# ============================================================
+
+# Data retention policy keywords (positive signals - indicate compliance)
+_RETENTION_POLICY_PATTERN = re.compile(
+    r"\b(?:"
+    r"retention[_\-\s]?policy|"
+    r"data[_\-\s]?retention|"
+    r"retention[_\-\s]?period|"
+    r"(?:ttl|time[_\-\s]?to[_\-\s]?live)\s*(?:[:=]|is)|"
+    r"expir(?:ation|es?|y)[_\-\s]?(?:policy|period|time|after)|"
+    r"auto[_\-\s]?(?:delete|purge|expire|cleanup)|"
+    r"data[_\-\s]?lifecycle|"
+    r"retention[_\-\s]?(?:days?|hours?|months?|years?)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Data storage/persistence keywords (indicate need for retention policy)
+_DATA_STORAGE_PATTERN = re.compile(
+    r"\b(?:"
+    r"(?:store|persist|save|log|record|cache|retain)[s]?\s+(?:\w+\s+)?(?:data|information|messages?|history|context|conversations?|interactions?|logs?|events?)|"
+    r"(?:conversation|chat|message|interaction|session)[_\-\s]?(?:history|log|store|memory|storage)|"
+    r"(?:user|customer|client)[_\-\s]?(?:data|information|records?|profiles?)|"
+    r"(?:database|storage|datastore|cache|bucket|collection|table)\b"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# ============================================================
+# PII Detection Patterns (REG-4)
+# ============================================================
+
+# Common PII patterns (regex fallback when presidio unavailable)
+_PII_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    # Email addresses
+    (re.compile(r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b"), "email address"),
+    # Phone numbers (international formats)
+    (re.compile(r"(?:\+\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}"), "phone number"),
+    # SSN (US)
+    (re.compile(r"\b\d{3}[-\s]?\d{2}[-\s]?\d{4}\b"), "SSN-like number"),
+    # Credit card numbers
+    (re.compile(r"\b(?:\d{4}[-\s]?){3}\d{4}\b"), "credit card-like number"),
+    # IP addresses
+    (re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b"), "IP address"),
+]
+
+# PII handling keywords that indicate processing of personal data
+_PII_HANDLING_PATTERN = re.compile(
+    r"\b(?:"
+    r"(?:personal|sensitive|private)[_\-\s]?(?:data|information|details)|"
+    r"PII|PHI|PCI|"
+    r"(?:collect|process|handle|store|gather)[s]?\s+(?:\w+\s+)?(?:personal|user|customer)\s+(?:data|information)|"
+    r"(?:name|email|phone|address|ssn|social[_\-\s]security|date[_\-\s]of[_\-\s]birth|dob)\s+(?:field|column|attribute|input)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Consent/privacy policy references (positive signals)
+_CONSENT_FRAMEWORK_PATTERN = re.compile(
+    r"\b(?:"
+    r"consent[_\-\s]?(?:framework|mechanism|management|form|policy)|"
+    r"privacy[_\-\s]?(?:policy|notice|statement|framework)|"
+    r"data[_\-\s]?(?:protection|processing)[_\-\s]?(?:agreement|policy|notice)|"
+    r"GDPR[_\-\s]?(?:complian|consent)|"
+    r"(?:opt[_\-\s]?in|opt[_\-\s]?out)\s+(?:mechanism|option|consent)|"
+    r"data[_\-\s]?subject[_\-\s]?(?:rights?|consent|access)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# ============================================================
+# Regulatory Compliance Markers (REG-5)
+# ============================================================
+
+# Known regulatory frameworks
+_REGULATORY_FRAMEWORK_PATTERN = re.compile(
+    r"\b(?:"
+    r"GDPR|"
+    r"HIPAA|"
+    r"SOC[_\-\s]?2|SOC2|"
+    r"PCI[_\-\s]?DSS|"
+    r"CCPA|CPRA|"
+    r"FERPA|"
+    r"COPPA|"
+    r"EU\s+AI\s+Act|"
+    r"NIST\s+AI\s+RMF|"
+    r"ISO\s+27001|"
+    r"FedRAMP|"
+    r"FISMA"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# High-risk domain keywords that suggest regulatory compliance needed
+_HIGH_RISK_DOMAIN_PATTERN = re.compile(
+    r"\b(?:"
+    r"(?:patient|medical|health|clinical|diagnostic|treatment)[_\-\s]?(?:data|records?|information)|"
+    r"(?:financial|banking|credit|loan|insurance)[_\-\s]?(?:data|records?|information|transactions?|decisions?)|"
+    r"(?:hire|hiring|recruit|employment|HR|human\s+resources)[_\-\s]?(?:decisions?|process|screening)|"
+    r"(?:criminal|law\s+enforcement|surveillance|biometric)[_\-\s]?(?:data|records?|screening|identification)|"
+    r"(?:child|minor|student|education)[_\-\s]?(?:data|records?|information|protection)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Risk classification metadata (positive signals)
+_RISK_CLASSIFICATION_PATTERN = re.compile(
+    r"\b(?:"
+    r"(?:ai|risk)[_\-\s]?(?:classification|tier|level|category)|"
+    r"human[_\-\s]?(?:oversight|in[_\-\s]the[_\-\s]loop|review)|"
+    r"transparency[_\-\s]?(?:requirement|declaration|notice)|"
+    r"regulatory[_\-\s]?(?:alignment|compliance|framework)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# ============================================================
+# Compliance-Sensitive Data in RAG (RAG-S3)
+# ============================================================
+
+_COMPLIANCE_SENSITIVE_DATA_PATTERN = re.compile(
+    r"\b(?:"
+    r"(?:patient|medical|health|clinical)\s+(?:record|data|information|history)|"
+    r"(?:protected\s+health\s+information|PHI)|"
+    r"(?:personally\s+identifiable|PII)|"
+    r"(?:financial|banking|credit)\s+(?:record|data|account)|"
+    r"(?:social\s+security|SSN|tax\s+(?:id|identification))|"
+    r"(?:biometric|genetic)\s+(?:data|information|sample)"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# ============================================================
+# Risk Metadata
+# ============================================================
+
 _RISK_METADATA: dict[str, dict[str, Any]] = {
     "REG-1": {
         "title": "Missing data residency declaration",
@@ -34,14 +258,15 @@ _RISK_METADATA: dict[str, dict[str, Any]] = {
         "gate_action": GateAction.WARN,
         "category": RiskCategory.COMPLIANCE,
         "description": (
-            "The artifact processes or stores data without declaring where that "
-            "data resides geographically. Missing data residency declarations "
-            "can violate data sovereignty laws (GDPR, data localization requirements)."
+            "The artifact references cross-region data transfer or cloud regions "
+            "without declaring data residency requirements. This may violate "
+            "data sovereignty laws (GDPR, data localization requirements)."
         ),
         "remediation": (
-            "Add a data_residency metadata field declaring processing and storage regions. "
-            "Document data flow paths including all external service regions."
+            "Add a data_residency metadata field declaring processing and storage "
+            "regions. Document data flow paths including all external service regions."
         ),
+        "confidence": 0.75,
     },
     "REG-2": {
         "title": "License compliance violation",
@@ -51,14 +276,15 @@ _RISK_METADATA: dict[str, dict[str, Any]] = {
         "gate_action": GateAction.WARN,
         "category": RiskCategory.COMPLIANCE,
         "description": (
-            "The artifact includes or references content, code, or models under "
-            "licenses that are incompatible with the project's license or usage terms. "
-            "This can expose the organization to legal risk."
+            "The artifact includes or references content under copyleft or "
+            "restrictive licenses that may be incompatible with the project's "
+            "license or usage terms."
         ),
         "remediation": (
-            "Audit all referenced content for license compatibility. "
-            "Maintain a license inventory for all third-party components used in artifacts."
+            "Audit all referenced content for license compatibility. Maintain a "
+            "license inventory for all third-party components used in artifacts."
         ),
+        "confidence": 0.95,
     },
     "REG-3": {
         "title": "Missing data retention policy",
@@ -68,14 +294,15 @@ _RISK_METADATA: dict[str, dict[str, Any]] = {
         "gate_action": GateAction.WARN,
         "category": RiskCategory.COMPLIANCE,
         "description": (
-            "The artifact handles user data (memory, context, logs) without "
-            "specifying a data retention policy. This violates data minimization "
-            "principles and may breach privacy regulations."
+            "The artifact handles user data without specifying a data retention "
+            "policy. This violates data minimization principles and may breach "
+            "privacy regulations."
         ),
         "remediation": (
-            "Define explicit retention periods for all stored data. "
-            "Implement automated data expiry and deletion mechanisms."
+            "Define explicit retention periods for all stored data. Implement "
+            "automated data expiry and deletion mechanisms (TTL, auto-purge)."
         ),
+        "confidence": 0.70,
     },
     "REG-4": {
         "title": "PII exposure without consent framework",
@@ -90,9 +317,11 @@ _RISK_METADATA: dict[str, dict[str, Any]] = {
             "PII without documented consent violates GDPR and similar regulations."
         ),
         "remediation": (
-            "Reference the applicable privacy policy and consent mechanism in artifact metadata. "
-            "Implement PII detection and redaction before storing data in artifacts."
+            "Reference the applicable privacy policy and consent mechanism in "
+            "artifact metadata. Implement PII detection and redaction before "
+            "storing data in artifacts."
         ),
+        "confidence": 0.80,
     },
     "REG-5": {
         "title": "Missing AI regulation alignment (EU AI Act)",
@@ -102,14 +331,15 @@ _RISK_METADATA: dict[str, dict[str, Any]] = {
         "gate_action": GateAction.WARN,
         "category": RiskCategory.COMPLIANCE,
         "description": (
-            "The artifact is part of an AI system that may fall under regulatory "
-            "frameworks (EU AI Act, NIST AI RMF) but lacks the required transparency, "
-            "risk classification, or documentation mandated by those regulations."
+            "The artifact is part of an AI system in a high-risk domain but "
+            "lacks required transparency, risk classification, or documentation "
+            "mandated by regulatory frameworks (EU AI Act, NIST AI RMF)."
         ),
         "remediation": (
             "Classify the AI system's risk tier per applicable regulation. "
             "Document human oversight mechanisms and transparency requirements."
         ),
+        "confidence": 0.70,
     },
     "RAG-S3": {
         "title": "Compliance-sensitive data in RAG",
@@ -120,305 +350,35 @@ _RISK_METADATA: dict[str, dict[str, Any]] = {
         "category": RiskCategory.SECURITY,
         "description": (
             "RAG knowledge base contains data subject to compliance regulations "
-            "without proper handling controls."
+            "(GDPR, HIPAA, PCI-DSS) without proper handling controls."
         ),
         "remediation": (
             "Classify data in RAG sources. Implement compliance controls. "
             "Remove or encrypt regulated data."
         ),
+        "confidence": 0.80,
     },
 }
 
-# --- Applicable artifact types (from design doc scanner-to-artifact matrix) ---
-_COMPLIANCE_TYPES: list[ArtifactType] = [
-    ArtifactType.AGENT,
-    ArtifactType.SOP,
-    ArtifactType.STEERING,
-    ArtifactType.MCP,
-    ArtifactType.PLUGIN,
-    ArtifactType.MEMORY,
-    ArtifactType.RAG,
-]
-
-# --- Cross-border data flow patterns (REG-1, REG-2) ---
-_CROSS_BORDER_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
-    (
-        "External API endpoint reference",
-        re.compile(
-            r"(?:https?://|endpoint[:\s]+|url[:\s]+|api[:\s]+|host[:\s]+)"
-            r"[^\s\"']+\.(?:com|io|net|org|cloud|aws|azure|gcp)",
-            re.IGNORECASE,
-        ),
-        0.70,
-    ),
-    (
-        "Cross-region data transfer",
-        re.compile(
-            r"\b(?:cross[- ]?(?:border|region)|data\s+transfer|"
-            r"international|offshore|foreign\s+(?:server|region|data\s*center))\b",
-            re.IGNORECASE,
-        ),
-        0.80,
-    ),
-    (
-        "Cloud region reference without controls",
-        re.compile(
-            r"\b(?:us-east|us-west|eu-west|eu-central|ap-southeast|"
-            r"ap-northeast|sa-east|af-south|me-south|"
-            r"eastus|westus|northeurope|westeurope|"
-            r"asia-east|asia-south)\b",
-            re.IGNORECASE,
-        ),
-        0.75,
-    ),
-]
-
-# Patterns indicating data residency is properly declared
-_RESIDENCY_DECLARATION_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"\bdata[_\s-]?residency\b", re.IGNORECASE),
-    re.compile(r"\bdata[_\s-]?region\b", re.IGNORECASE),
-    re.compile(r"\bprocessing[_\s-]?location\b", re.IGNORECASE),
-    re.compile(r"\bstorage[_\s-]?region\b", re.IGNORECASE),
-    re.compile(r"\bdata[_\s-]?sovereignty\b", re.IGNORECASE),
-    re.compile(r"\bgeographic[_\s-]?(?:restriction|control|constraint)\b", re.IGNORECASE),
-]
-
-# --- License compliance patterns (REG-2) ---
-_RESTRICTED_LICENSE_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
-    (
-        "GPL family license (copyleft)",
-        re.compile(
-            r"\b(?:GPL|GNU\s+General\s+Public\s+License|GPLv[23]|AGPL|"
-            r"GNU\s+Affero|LGPL)\b",
-            re.IGNORECASE,
-        ),
-        0.95,
-    ),
-    (
-        "Creative Commons restrictive license",
-        re.compile(
-            r"\bCC[- ](?:BY[- ](?:NC|SA|ND|NC-SA|NC-ND)|NC|SA|ND)\b",
-            re.IGNORECASE,
-        ),
-        0.85,
-    ),
-    (
-        "SSPL license (Server Side Public License)",
-        re.compile(r"\bSSPL\b", re.IGNORECASE),
-        0.95,
-    ),
-    (
-        "Proprietary/commercial license reference",
-        re.compile(
-            r"\b(?:proprietary|commercial\s+license|all\s+rights\s+reserved|"
-            r"no\s+redistribution|restricted\s+use)\b",
-            re.IGNORECASE,
-        ),
-        0.80,
-    ),
-    (
-        "License file reference without compatibility check",
-        re.compile(
-            r"(?:license|LICENSE|LICENCE)(?:\.(?:md|txt|rst))?",
-            re.IGNORECASE,
-        ),
-        0.60,
-    ),
-]
-
-# --- Retention policy patterns (REG-3) ---
-_DATA_HANDLING_KEYWORDS: list[re.Pattern[str]] = [
-    re.compile(r"\b(?:store|persist|save|cache|log|record|retain|archive)\b", re.IGNORECASE),
-    re.compile(r"\b(?:user\s+data|personal\s+data|conversation|history|session)\b", re.IGNORECASE),
-    re.compile(r"\b(?:memory|context|state|storage)\b", re.IGNORECASE),
-]
-
-_RETENTION_POLICY_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"\b(?:retention[_\s-]?policy|ttl|time[_\s-]?to[_\s-]?live)\b", re.IGNORECASE),
-    re.compile(r"\b(?:expir(?:y|ation|es)|auto[_\s-]?delete|purge|cleanup)\b", re.IGNORECASE),
-    re.compile(r"\b(?:data[_\s-]?lifecycle|retention[_\s-]?period|max[_\s-]?age)\b", re.IGNORECASE),
-    re.compile(r"\b(?:delete\s+after|remove\s+after|expire\s+after)\b", re.IGNORECASE),
-]
-
-# --- PII patterns (REG-4) ---
-_PII_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
-    (
-        "Email address",
-        re.compile(
-            r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b",
-        ),
-        0.85,
-    ),
-    (
-        "Phone number",
-        re.compile(
-            r"(?:\+?\d{1,3}[-.\s]?)?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}\b",
-        ),
-        0.75,
-    ),
-    (
-        "SSN-like pattern",
-        re.compile(r"\b\d{3}[-]\d{2}[-]\d{4}\b"),
-        0.90,
-    ),
-    (
-        "Credit card number pattern",
-        re.compile(r"\b(?:\d{4}[-\s]?){3}\d{4}\b"),
-        0.85,
-    ),
-    (
-        "PII field reference",
-        re.compile(
-            r"\b(?:social[_\s-]?security|ssn|date[_\s-]?of[_\s-]?birth|"
-            r"dob|passport|national[_\s-]?id|driver[_\s-]?license|"
-            r"bank[_\s-]?account|medical[_\s-]?record|health[_\s-]?data|"
-            r"biometric|fingerprint|facial[_\s-]?recognition)\b",
-            re.IGNORECASE,
-        ),
-        0.80,
-    ),
-    (
-        "Personal data processing reference",
-        re.compile(
-            r"\b(?:collect(?:s|ing)?|process(?:es|ing)?|stor(?:es?|ing)|"
-            r"transmit(?:s|ting)?)\s+(?:\w+\s+){0,3}"
-            r"(?:personal|user|customer|patient|employee)\s+"
-            r"(?:data|information|details|records)\b",
-            re.IGNORECASE,
-        ),
-        0.75,
-    ),
-]
-
-# Consent/privacy framework references
-_CONSENT_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"\b(?:consent[_\s-]?(?:framework|mechanism|management))\b", re.IGNORECASE),
-    re.compile(r"\b(?:privacy[_\s-]?policy|data[_\s-]?protection)\b", re.IGNORECASE),
-    re.compile(r"\b(?:gdpr|ccpa|hipaa|pipeda|lgpd)\b", re.IGNORECASE),
-    re.compile(r"\b(?:opt[_\s-]?in|opt[_\s-]?out|user[_\s-]?consent)\b", re.IGNORECASE),
-    re.compile(
-        r"\b(?:data[_\s-]?subject[_\s-]?rights|right\s+to\s+(?:erasure|forget))\b", re.IGNORECASE
-    ),
-]
-
-# --- Audit trail / compliance documentation patterns (REG-5) ---
-_HIGH_RISK_DOMAIN_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
-    (
-        "Healthcare/medical domain",
-        re.compile(
-            r"\b(?:healthcare|medical|patient|diagnosis|treatment|"
-            r"clinical|pharmaceutical|health[_\s-]?record)\b",
-            re.IGNORECASE,
-        ),
-        0.75,
-    ),
-    (
-        "Financial domain",
-        re.compile(
-            r"\b(?:financial|banking|credit[_\s-]?(?:score|decision)|"
-            r"loan|mortgage|insurance|trading|investment)\b",
-            re.IGNORECASE,
-        ),
-        0.75,
-    ),
-    (
-        "HR/employment domain",
-        re.compile(
-            r"\b(?:hiring|recruitment|employment|resume|candidate[_\s-]?screen|"
-            r"performance[_\s-]?review|termination|promotion)\b",
-            re.IGNORECASE,
-        ),
-        0.70,
-    ),
-    (
-        "Legal/judicial domain",
-        re.compile(
-            r"\b(?:legal|judicial|sentencing|parole|bail|law\s+enforcement|"
-            r"criminal|prosecution|court)\b",
-            re.IGNORECASE,
-        ),
-        0.75,
-    ),
-    (
-        "Education domain (automated decisions)",
-        re.compile(
-            r"\b(?:grading|admission|student[_\s-]?evaluation|"
-            r"academic[_\s-]?decision|expulsion)\b",
-            re.IGNORECASE,
-        ),
-        0.70,
-    ),
-]
-
-_REGULATION_ALIGNMENT_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"\b(?:ai[_\s-]?risk[_\s-]?classification|risk[_\s-]?tier)\b", re.IGNORECASE),
-    re.compile(r"\b(?:eu[_\s-]?ai[_\s-]?act|nist[_\s-]?ai[_\s-]?rmf)\b", re.IGNORECASE),
-    re.compile(r"\b(?:human[_\s-]?oversight|human[_\s-]?in[_\s-]?the[_\s-]?loop)\b", re.IGNORECASE),
-    re.compile(r"\b(?:transparency[_\s-]?requirement|explainability)\b", re.IGNORECASE),
-    re.compile(
-        r"\b(?:regulatory[_\s-]?alignment|compliance[_\s-]?classification)\b", re.IGNORECASE
-    ),
-]
-
-# --- Audit trail patterns (REG-5 secondary) ---
-_AUDIT_TRAIL_PATTERNS: list[re.Pattern[str]] = [
-    re.compile(r"\b(?:audit[_\s-]?(?:log|trail|record))\b", re.IGNORECASE),
-    re.compile(r"\b(?:compliance[_\s-]?log(?:ging)?)\b", re.IGNORECASE),
-    re.compile(r"\b(?:accountability|traceability)\b", re.IGNORECASE),
-]
-
-# --- RAG compliance-sensitive data patterns (RAG-S3) ---
-_COMPLIANCE_SENSITIVE_DATA_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
-    (
-        "GDPR-protected data reference",
-        re.compile(
-            r"\b(?:gdpr|personal\s+data|data\s+subject|"
-            r"right\s+to\s+be\s+forgotten|erasure\s+request)\b",
-            re.IGNORECASE,
-        ),
-        0.80,
-    ),
-    (
-        "HIPAA-covered information",
-        re.compile(
-            r"\b(?:hipaa|phi|protected\s+health\s+information|"
-            r"patient\s+(?:data|record|information)|"
-            r"medical\s+(?:record|history|diagnosis))\b",
-            re.IGNORECASE,
-        ),
-        0.85,
-    ),
-    (
-        "Financial regulation data (PCI-DSS, SOX)",
-        re.compile(
-            r"\b(?:pci[- ]?dss|sox|sarbanes|cardholder\s+data|"
-            r"payment\s+card|account\s+number)\b",
-            re.IGNORECASE,
-        ),
-        0.85,
-    ),
-]
-
 
 class ComplianceAuditScanner(BaseScanner):
-    """Scanner for detecting regulatory compliance and privacy risks.
+    """Scanner for detecting regulatory compliance risks in AI artifacts.
 
     Detects:
-    - REG-1: Missing data residency declarations
-    - REG-2: License compliance violations (copyleft, restricted licenses)
-    - REG-3: Missing data retention policies
-    - REG-4: PII processing without consent frameworks
-    - REG-5: Missing AI regulation alignment for high-risk domains
-    - RAG-S3: Compliance-sensitive data in RAG sources
+    - Missing data residency declarations (REG-1)
+    - License compliance violations (REG-2)
+    - Missing data retention policies (REG-3)
+    - PII exposure without consent framework (REG-4)
+    - Missing regulatory compliance markers (REG-5)
+    - Compliance-sensitive data in RAG sources (RAG-S3)
 
-    Uses regex-based heuristics by default. Optionally integrates with
-    the `presidio-analyzer` library for enhanced PII detection when available.
+    Always available via regex-based detection. Enhanced PII detection
+    available when `presidio-analyzer` is installed.
     """
 
     def __init__(self) -> None:
-        """Initialize the ComplianceAudit scanner with lazy-loaded optional deps."""
-        self._presidio: Any | None = None
-        self._presidio_loaded = False
+        """Initialize the ComplianceAudit scanner."""
+        self._presidio_available: bool | None = None
 
     @property
     def name(self) -> ScannerModule:
@@ -427,436 +387,41 @@ class ComplianceAuditScanner(BaseScanner):
 
     @property
     def applicable_artifact_types(self) -> list[ArtifactType]:
-        """Artifact types this scanner can analyze."""
-        return list(_COMPLIANCE_TYPES)
+        """Artifact types this scanner can analyze.
+
+        Applicable to: Agent, SOP, Steering, MCP, Plugin, Memory, RAG.
+        NOT applicable to: Prompt, Skill, Hook, Instruction, Eval Harness,
+        Orchestration, API Schema.
+        """
+        return [
+            ArtifactType.AGENT,
+            ArtifactType.SOP,
+            ArtifactType.STEERING,
+            ArtifactType.MCP,
+            ArtifactType.PLUGIN,
+            ArtifactType.MEMORY,
+            ArtifactType.RAG,
+        ]
 
     @property
     def detected_risk_ids(self) -> list[str]:
-        """Risk IDs this scanner detects."""
+        """Risk IDs this scanner is capable of detecting."""
         return ["REG-1", "REG-2", "REG-3", "REG-4", "REG-5", "RAG-S3"]
 
     def is_available(self) -> bool:
-        """Always available - uses regex fallback without optional deps."""
+        """Always available via regex-based detection."""
         return True
 
-    def _load_presidio(self) -> Any | None:
-        """Lazily load the presidio-analyzer library for enhanced PII detection.
-
-        Returns:
-            The AnalyzerEngine class, or None if not installed.
-        """
-        if not self._presidio_loaded:
-            self._presidio_loaded = True
+    def _check_presidio_available(self) -> bool:
+        """Lazy check for optional presidio-analyzer dependency."""
+        if self._presidio_available is None:
             try:
-                from presidio_analyzer import AnalyzerEngine
+                import presidio_analyzer  # noqa: F401
 
-                self._presidio = AnalyzerEngine
+                self._presidio_available = True
             except ImportError:
-                self._presidio = None
-        return self._presidio
-
-    def _create_finding(
-        self,
-        risk_id: str,
-        artifact_type: ArtifactType,
-        artifact_path: str,
-        evidence: str,
-        confidence: float,
-        line: int | None = None,
-        detail: str = "",
-    ) -> ScanFinding:
-        """Create a ScanFinding from risk metadata.
-
-        Args:
-            risk_id: The risk ID to report.
-            artifact_type: Type of artifact.
-            artifact_path: Path to the artifact file.
-            evidence: The triggering text/pattern.
-            confidence: Detection confidence (0.0-1.0).
-            line: Line number where finding was detected.
-            detail: Additional detail to append to description.
-
-        Returns:
-            A fully constructed ScanFinding.
-        """
-        metadata = _RISK_METADATA[risk_id]
-
-        # Truncate evidence to avoid overly long findings
-        truncated_evidence = evidence[:80] + "..." if len(evidence) > 80 else evidence
-
-        description = metadata["description"]
-        if detail:
-            description = f"{description} {detail}"
-
-        return ScanFinding(
-            id=risk_id,
-            artifact_type=artifact_type,
-            artifact_path=artifact_path,
-            severity_score=metadata["severity_score"],
-            severity_label=metadata["severity_label"],
-            priority=metadata["priority"],
-            gate_action=metadata["gate_action"],
-            category=metadata["category"],
-            title=metadata["title"],
-            description=description,
-            location=FindingLocation(line=line),
-            evidence=truncated_evidence,
-            confidence=confidence,
-            scanner_module=ScannerModule.COMPLIANCE_AUDIT,
-            remediation=metadata["remediation"],
-            references=[],
-        )
-
-    def _detect_missing_residency(
-        self,
-        content: str,
-        artifact_type: ArtifactType,
-        artifact_path: str,
-    ) -> list[ScanFinding]:
-        """Detect missing data residency declarations (REG-1).
-
-        Looks for cross-border data flow references without corresponding
-        data residency declarations.
-
-        Args:
-            content: Artifact content.
-            artifact_type: Type of artifact.
-            artifact_path: Path to artifact.
-
-        Returns:
-            List of REG-1 findings.
-        """
-        findings: list[ScanFinding] = []
-
-        # Check if there are data flow references
-        has_data_flow = False
-        data_flow_evidence: list[tuple[str, int, float]] = []
-        lines = content.splitlines()
-
-        for pattern_name, pattern, confidence in _CROSS_BORDER_PATTERNS:
-            for line_num, line in enumerate(lines, start=1):
-                for match in pattern.finditer(line):
-                    has_data_flow = True
-                    data_flow_evidence.append((match.group(0), line_num, confidence))
-
-        if not has_data_flow:
-            return findings
-
-        # Check if data residency is declared
-        has_residency = any(p.search(content) for p in _RESIDENCY_DECLARATION_PATTERNS)
-
-        if not has_residency:
-            # Report the first data flow reference as evidence
-            evidence_text, line_num, confidence = data_flow_evidence[0]
-            findings.append(
-                self._create_finding(
-                    risk_id="REG-1",
-                    artifact_type=artifact_type,
-                    artifact_path=artifact_path,
-                    evidence=f"Data flow detected: {evidence_text}",
-                    confidence=confidence,
-                    line=line_num,
-                    detail="Cross-border data flow detected without residency declaration.",
-                )
-            )
-
-        return findings
-
-    def _detect_license_violations(
-        self,
-        content: str,
-        artifact_type: ArtifactType,
-        artifact_path: str,
-    ) -> list[ScanFinding]:
-        """Detect license compliance issues (REG-2).
-
-        Scans for references to restrictive or copyleft licenses without
-        compatibility documentation.
-
-        Args:
-            content: Artifact content.
-            artifact_type: Type of artifact.
-            artifact_path: Path to artifact.
-
-        Returns:
-            List of REG-2 findings.
-        """
-        findings: list[ScanFinding] = []
-        lines = content.splitlines()
-
-        for pattern_name, pattern, confidence in _RESTRICTED_LICENSE_PATTERNS:
-            for line_num, line in enumerate(lines, start=1):
-                for match in pattern.finditer(line):
-                    # Skip the generic LICENSE file reference pattern if it has
-                    # low confidence and no strong surrounding context
-                    if confidence < 0.65:
-                        continue
-
-                    findings.append(
-                        self._create_finding(
-                            risk_id="REG-2",
-                            artifact_type=artifact_type,
-                            artifact_path=artifact_path,
-                            evidence=match.group(0),
-                            confidence=confidence,
-                            line=line_num,
-                            detail=f"Detected: {pattern_name}.",
-                        )
-                    )
-                    break  # One finding per pattern per line is enough
-
-        return findings
-
-    def _detect_missing_retention(
-        self,
-        content: str,
-        artifact_type: ArtifactType,
-        artifact_path: str,
-    ) -> list[ScanFinding]:
-        """Detect missing data retention policy (REG-3).
-
-        Checks if the artifact handles data (stores, persists, caches)
-        without specifying a retention policy.
-
-        Args:
-            content: Artifact content.
-            artifact_type: Type of artifact.
-            artifact_path: Path to artifact.
-
-        Returns:
-            List of REG-3 findings.
-        """
-        findings: list[ScanFinding] = []
-
-        # Check if artifact handles data
-        has_data_handling = any(p.search(content) for p in _DATA_HANDLING_KEYWORDS)
-
-        if not has_data_handling:
-            return findings
-
-        # Check if retention policy is specified
-        has_retention = any(p.search(content) for p in _RETENTION_POLICY_PATTERNS)
-
-        if not has_retention:
-            # Find the first data handling keyword for evidence
-            evidence_line = None
-            evidence_text = "Data handling detected without retention policy"
-            lines = content.splitlines()
-            for pattern in _DATA_HANDLING_KEYWORDS:
-                for line_num, line in enumerate(lines, start=1):
-                    match = pattern.search(line)
-                    if match:
-                        evidence_text = match.group(0)
-                        evidence_line = line_num
-                        break
-                if evidence_line is not None:
-                    break
-
-            findings.append(
-                self._create_finding(
-                    risk_id="REG-3",
-                    artifact_type=artifact_type,
-                    artifact_path=artifact_path,
-                    evidence=f"Data handling: '{evidence_text}'",
-                    confidence=0.75,
-                    line=evidence_line,
-                    detail="Artifact handles data without specifying retention policy.",
-                )
-            )
-
-        return findings
-
-    def _detect_pii_without_consent(
-        self,
-        content: str,
-        artifact_type: ArtifactType,
-        artifact_path: str,
-    ) -> list[ScanFinding]:
-        """Detect PII processing without consent framework (REG-4).
-
-        Looks for PII patterns in the content and checks whether a consent
-        mechanism or privacy policy is referenced.
-
-        Args:
-            content: Artifact content.
-            artifact_type: Type of artifact.
-            artifact_path: Path to artifact.
-
-        Returns:
-            List of REG-4 findings.
-        """
-        findings: list[ScanFinding] = []
-
-        # First check if content has PII indicators
-        pii_evidence: list[tuple[str, int, float]] = []
-        lines = content.splitlines()
-
-        for pattern_name, pattern, confidence in _PII_PATTERNS:
-            for line_num, line in enumerate(lines, start=1):
-                match = pattern.search(line)
-                if match:
-                    pii_evidence.append(
-                        (
-                            f"{pattern_name}: {match.group(0)}",
-                            line_num,
-                            confidence,
-                        )
-                    )
-                    break  # One match per pattern type is enough
-
-        if not pii_evidence:
-            return findings
-
-        # Check if consent framework is referenced
-        has_consent = any(p.search(content) for p in _CONSENT_PATTERNS)
-
-        if not has_consent:
-            # Report the highest confidence PII finding
-            pii_evidence.sort(key=lambda x: x[2], reverse=True)
-            evidence_text, line_num, confidence = pii_evidence[0]
-
-            findings.append(
-                self._create_finding(
-                    risk_id="REG-4",
-                    artifact_type=artifact_type,
-                    artifact_path=artifact_path,
-                    evidence=evidence_text,
-                    confidence=confidence,
-                    line=line_num,
-                    detail="PII detected without consent framework reference.",
-                )
-            )
-
-        # Also try presidio if available for enhanced PII detection
-        self._load_presidio()
-
-        return findings
-
-    def _detect_missing_regulation_alignment(
-        self,
-        content: str,
-        artifact_type: ArtifactType,
-        artifact_path: str,
-    ) -> list[ScanFinding]:
-        """Detect missing AI regulation alignment (REG-5).
-
-        Checks if the artifact operates in a high-risk domain without
-        the required regulatory compliance documentation.
-
-        Args:
-            content: Artifact content.
-            artifact_type: Type of artifact.
-            artifact_path: Path to artifact.
-
-        Returns:
-            List of REG-5 findings.
-        """
-        findings: list[ScanFinding] = []
-
-        # Check if the artifact operates in a high-risk domain
-        high_risk_evidence: list[tuple[str, int, float]] = []
-        lines = content.splitlines()
-
-        for domain_name, pattern, confidence in _HIGH_RISK_DOMAIN_PATTERNS:
-            for line_num, line in enumerate(lines, start=1):
-                match = pattern.search(line)
-                if match:
-                    high_risk_evidence.append(
-                        (
-                            f"{domain_name}: {match.group(0)}",
-                            line_num,
-                            confidence,
-                        )
-                    )
-                    break  # One match per domain
-
-        if not high_risk_evidence:
-            return findings
-
-        # Check if regulation alignment is declared
-        has_alignment = any(p.search(content) for p in _REGULATION_ALIGNMENT_PATTERNS)
-
-        # Also check for audit trail
-        has_audit_trail = any(p.search(content) for p in _AUDIT_TRAIL_PATTERNS)
-
-        if not has_alignment:
-            # Report the highest confidence domain match
-            high_risk_evidence.sort(key=lambda x: x[2], reverse=True)
-            evidence_text, line_num, confidence = high_risk_evidence[0]
-
-            findings.append(
-                self._create_finding(
-                    risk_id="REG-5",
-                    artifact_type=artifact_type,
-                    artifact_path=artifact_path,
-                    evidence=evidence_text,
-                    confidence=confidence,
-                    line=line_num,
-                    detail="High-risk domain artifact without AI regulation alignment.",
-                )
-            )
-
-            # Report missing audit trail as secondary signal (only if alignment also missing)
-            if not has_audit_trail:
-                findings.append(
-                    self._create_finding(
-                        risk_id="REG-5",
-                        artifact_type=artifact_type,
-                        artifact_path=artifact_path,
-                        evidence=f"Missing audit trail for: {evidence_text}",
-                        confidence=confidence * 0.9,  # Slightly lower for secondary signal
-                        line=line_num,
-                        detail="High-risk domain lacks compliance audit trail/logging.",
-                    )
-                )
-
-        return findings
-
-    def _detect_rag_compliance_data(
-        self,
-        content: str,
-        artifact_type: ArtifactType,
-        artifact_path: str,
-    ) -> list[ScanFinding]:
-        """Detect compliance-sensitive data in RAG sources (RAG-S3).
-
-        Only applies to RAG artifact types. Looks for regulated data
-        patterns (GDPR, HIPAA, PCI-DSS).
-
-        Args:
-            content: Artifact content.
-            artifact_type: Type of artifact.
-            artifact_path: Path to artifact.
-
-        Returns:
-            List of RAG-S3 findings.
-        """
-        findings: list[ScanFinding] = []
-
-        # Only apply to RAG artifacts
-        if artifact_type != ArtifactType.RAG:
-            return findings
-
-        lines = content.splitlines()
-
-        for pattern_name, pattern, confidence in _COMPLIANCE_SENSITIVE_DATA_PATTERNS:
-            for line_num, line in enumerate(lines, start=1):
-                match = pattern.search(line)
-                if match:
-                    findings.append(
-                        self._create_finding(
-                            risk_id="RAG-S3",
-                            artifact_type=artifact_type,
-                            artifact_path=artifact_path,
-                            evidence=match.group(0),
-                            confidence=confidence,
-                            line=line_num,
-                            detail=f"Detected: {pattern_name}.",
-                        )
-                    )
-                    break  # One finding per pattern type
-
-        return findings
+                self._presidio_available = False
+        return self._presidio_available
 
     def scan(
         self,
@@ -864,10 +429,7 @@ class ComplianceAuditScanner(BaseScanner):
         artifact_type: ArtifactType,
         artifact_path: str,
     ) -> list[ScanFinding]:
-        """Scan an artifact for compliance and regulatory risks.
-
-        Applies license scanning, data residency flow mapping, retention
-        policy checking, PII detection, and AI regulation alignment checking.
+        """Scan an artifact for regulatory compliance risks.
 
         Args:
             artifact_content: The full text content of the artifact.
@@ -877,41 +439,369 @@ class ComplianceAuditScanner(BaseScanner):
         Returns:
             List of ScanFinding objects (may be empty).
         """
-        if artifact_type not in _COMPLIANCE_TYPES:
-            return []
-
         findings: list[ScanFinding] = []
 
-        # 1. Missing data residency declaration (REG-1)
-        findings.extend(
-            self._detect_missing_residency(artifact_content, artifact_type, artifact_path)
-        )
+        if artifact_type not in self.applicable_artifact_types:
+            return findings
 
-        # 2. License compliance violations (REG-2)
+        # Run all detection methods
         findings.extend(
             self._detect_license_violations(artifact_content, artifact_type, artifact_path)
         )
-
-        # 3. Missing data retention policy (REG-3)
         findings.extend(
-            self._detect_missing_retention(artifact_content, artifact_type, artifact_path)
+            self._detect_data_residency_issues(artifact_content, artifact_type, artifact_path)
         )
-
-        # 4. PII without consent framework (REG-4)
+        findings.extend(
+            self._detect_missing_retention_policy(artifact_content, artifact_type, artifact_path)
+        )
         findings.extend(
             self._detect_pii_without_consent(artifact_content, artifact_type, artifact_path)
         )
-
-        # 5. Missing AI regulation alignment (REG-5)
         findings.extend(
-            self._detect_missing_regulation_alignment(
-                artifact_content, artifact_type, artifact_path
+            self._detect_missing_regulatory_markers(artifact_content, artifact_type, artifact_path)
+        )
+
+        # RAG-specific: compliance-sensitive data
+        if artifact_type == ArtifactType.RAG:
+            findings.extend(
+                self._detect_compliance_sensitive_data(
+                    artifact_content, artifact_type, artifact_path
+                )
+            )
+
+        return findings
+
+    def _find_line_number(self, content: str, match_start: int) -> int:
+        """Find the 1-based line number for a character offset."""
+        return content[:match_start].count("\n") + 1
+
+    def _create_finding(
+        self,
+        risk_id: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+        evidence: str,
+        confidence: float | None = None,
+        line: int | None = None,
+    ) -> ScanFinding:
+        """Create a ScanFinding from risk metadata.
+
+        Args:
+            risk_id: The risk ID for this finding.
+            artifact_type: The artifact type being scanned.
+            artifact_path: Path to the artifact file.
+            evidence: The text/pattern that triggered the finding.
+            confidence: Confidence score override (uses metadata default if None).
+            line: Optional line number where finding was detected.
+
+        Returns:
+            A complete ScanFinding object.
+        """
+        meta = _RISK_METADATA[risk_id]
+        return ScanFinding(
+            id=risk_id,
+            artifact_type=artifact_type,
+            artifact_path=artifact_path,
+            severity_score=meta["severity_score"],
+            severity_label=meta["severity_label"],
+            priority=meta["priority"],
+            gate_action=meta["gate_action"],
+            category=meta["category"],
+            title=meta["title"],
+            description=meta["description"],
+            location=FindingLocation(line=line),
+            evidence=evidence[:200],
+            confidence=confidence if confidence is not None else meta["confidence"],
+            scanner_module=ScannerModule.COMPLIANCE_AUDIT,
+            remediation=meta["remediation"],
+            references=[],
+        )
+
+    def _detect_license_violations(
+        self,
+        content: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Detect license compliance violations (REG-2).
+
+        Looks for copyleft/restrictive license references and missing
+        license declarations in artifacts.
+        """
+        findings: list[ScanFinding] = []
+
+        # Check for copyleft/restrictive license references
+        copyleft_match = _COPYLEFT_LICENSE_PATTERN.search(content)
+        if copyleft_match:
+            line = self._find_line_number(content, copyleft_match.start())
+            evidence = (
+                f"Copyleft/restrictive license reference detected: "
+                f"'{copyleft_match.group(0)}'. Verify compatibility with project license."
+            )
+            findings.append(
+                self._create_finding(
+                    risk_id="REG-2",
+                    artifact_type=artifact_type,
+                    artifact_path=artifact_path,
+                    evidence=evidence,
+                    confidence=0.95,
+                    line=line,
+                )
+            )
+
+        return findings
+
+    def _detect_data_residency_issues(
+        self,
+        content: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Detect cross-region data transfer without residency declarations (REG-1).
+
+        Looks for region references and data transfer patterns without
+        corresponding data residency declarations.
+        """
+        findings: list[ScanFinding] = []
+
+        # Check if there are region references or data transfer patterns
+        has_region_ref = _REGION_PATTERN.search(content)
+        has_data_transfer = _DATA_TRANSFER_PATTERN.search(content)
+
+        if not has_region_ref and not has_data_transfer:
+            return findings
+
+        # Check if there's a data residency declaration (positive signal)
+        has_residency_declaration = _RESIDENCY_DECLARATION_PATTERN.search(content)
+
+        if has_residency_declaration:
+            # Residency is declared, no issue
+            return findings
+
+        # Found region/transfer references without residency declaration
+        match = has_region_ref or has_data_transfer
+        if match:
+            line = self._find_line_number(content, match.start())
+            if has_data_transfer:
+                evidence = (
+                    f"Cross-region data transfer reference without data residency "
+                    f"declaration: '{match.group(0)}'"
+                )
+                confidence = 0.80
+            else:
+                evidence = (
+                    f"Cloud region reference without data residency declaration: '{match.group(0)}'"
+                )
+                confidence = 0.70
+            findings.append(
+                self._create_finding(
+                    risk_id="REG-1",
+                    artifact_type=artifact_type,
+                    artifact_path=artifact_path,
+                    evidence=evidence,
+                    confidence=confidence,
+                    line=line,
+                )
+            )
+
+        return findings
+
+    def _detect_missing_retention_policy(
+        self,
+        content: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Detect missing data retention/expiration policies (REG-3).
+
+        Looks for data storage/persistence patterns without corresponding
+        retention policy declarations.
+        """
+        findings: list[ScanFinding] = []
+
+        # Check if artifact stores/persists data
+        storage_match = _DATA_STORAGE_PATTERN.search(content)
+        if not storage_match:
+            return findings
+
+        # Check if there's a retention policy declared
+        has_retention_policy = _RETENTION_POLICY_PATTERN.search(content)
+        if has_retention_policy:
+            return findings
+
+        # Data storage without retention policy
+        line = self._find_line_number(content, storage_match.start())
+        evidence = (
+            f"Data storage/persistence without retention policy: "
+            f"'{storage_match.group(0).strip()}'. No TTL, expiration, or "
+            f"retention period defined."
+        )
+        findings.append(
+            self._create_finding(
+                risk_id="REG-3",
+                artifact_type=artifact_type,
+                artifact_path=artifact_path,
+                evidence=evidence,
+                confidence=0.70,
+                line=line,
             )
         )
 
-        # 6. Compliance-sensitive data in RAG (RAG-S3)
-        findings.extend(
-            self._detect_rag_compliance_data(artifact_content, artifact_type, artifact_path)
+        return findings
+
+    def _detect_pii_without_consent(
+        self,
+        content: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Detect PII handling without consent framework (REG-4).
+
+        Looks for PII patterns or PII handling keywords without
+        corresponding consent/privacy policy references.
+        """
+        findings: list[ScanFinding] = []
+
+        # Check for PII indicators
+        has_pii_handling = _PII_HANDLING_PATTERN.search(content)
+        has_pii_data = False
+        pii_evidence = ""
+
+        # Check for actual PII data patterns
+        for pattern, pii_type in _PII_PATTERNS:
+            match = pattern.search(content)
+            if match:
+                has_pii_data = True
+                pii_evidence = f"{pii_type}: '{match.group(0)}'"
+                break
+
+        if not has_pii_handling and not has_pii_data:
+            return findings
+
+        # Check for consent/privacy framework references
+        has_consent = _CONSENT_FRAMEWORK_PATTERN.search(content)
+        if has_consent:
+            return findings
+
+        # PII detected without consent framework
+        if has_pii_handling:
+            line = self._find_line_number(content, has_pii_handling.start())
+            evidence = (
+                f"PII handling without consent framework reference: "
+                f"'{has_pii_handling.group(0).strip()}'"
+            )
+            confidence = 0.80
+        elif has_pii_data:
+            # Find the first PII match again for line number
+            for pat, pii_type in _PII_PATTERNS:
+                m = pat.search(content)
+                if m:
+                    line = self._find_line_number(content, m.start())
+                    evidence = f"PII data detected without consent framework: {pii_evidence}"
+                    confidence = 0.75
+                    break
+            else:
+                return findings
+        else:
+            return findings
+
+        findings.append(
+            self._create_finding(
+                risk_id="REG-4",
+                artifact_type=artifact_type,
+                artifact_path=artifact_path,
+                evidence=evidence,
+                confidence=confidence,
+                line=line,
+            )
+        )
+
+        return findings
+
+    def _detect_missing_regulatory_markers(
+        self,
+        content: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Detect missing regulatory compliance markers (REG-5).
+
+        Looks for high-risk domain keywords without corresponding
+        regulatory framework references or risk classification.
+        """
+        findings: list[ScanFinding] = []
+
+        # Check if content operates in a high-risk domain
+        domain_match = _HIGH_RISK_DOMAIN_PATTERN.search(content)
+        if not domain_match:
+            return findings
+
+        # Check for regulatory framework references
+        has_regulatory_ref = _REGULATORY_FRAMEWORK_PATTERN.search(content)
+        has_risk_classification = _RISK_CLASSIFICATION_PATTERN.search(content)
+
+        if has_regulatory_ref or has_risk_classification:
+            return findings
+
+        # High-risk domain without regulatory markers
+        line = self._find_line_number(content, domain_match.start())
+        evidence = (
+            f"High-risk domain reference without regulatory compliance markers: "
+            f"'{domain_match.group(0).strip()}'. No GDPR, HIPAA, SOC2, or "
+            f"risk classification declaration found."
+        )
+        findings.append(
+            self._create_finding(
+                risk_id="REG-5",
+                artifact_type=artifact_type,
+                artifact_path=artifact_path,
+                evidence=evidence,
+                confidence=0.70,
+                line=line,
+            )
+        )
+
+        return findings
+
+    def _detect_compliance_sensitive_data(
+        self,
+        content: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Detect compliance-sensitive data in RAG sources (RAG-S3).
+
+        Specifically for RAG artifacts: looks for references to regulated
+        data types (PHI, PII, financial data) without compliance controls.
+        """
+        findings: list[ScanFinding] = []
+
+        sensitive_match = _COMPLIANCE_SENSITIVE_DATA_PATTERN.search(content)
+        if not sensitive_match:
+            return findings
+
+        # Check if compliance controls are mentioned
+        has_controls = _REGULATORY_FRAMEWORK_PATTERN.search(content)
+        has_consent = _CONSENT_FRAMEWORK_PATTERN.search(content)
+
+        if has_controls or has_consent:
+            return findings
+
+        # Compliance-sensitive data without controls
+        line = self._find_line_number(content, sensitive_match.start())
+        evidence = (
+            f"Compliance-sensitive data in RAG without proper controls: "
+            f"'{sensitive_match.group(0).strip()}'"
+        )
+        findings.append(
+            self._create_finding(
+                risk_id="RAG-S3",
+                artifact_type=artifact_type,
+                artifact_path=artifact_path,
+                evidence=evidence,
+                confidence=0.80,
+                line=line,
+            )
         )
 
         return findings

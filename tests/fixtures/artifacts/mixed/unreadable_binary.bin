@@ -1,0 +1,5 @@
+\x00\x01\x02\x03\x04\x05\xff\xfe\xfd\xfc\xfb\xfa
+\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00
+This is a binary-like file that simulates an unreadable artifact.
+Scanners should gracefully handle files with non-UTF8 content.
+\x00\x00\x00\x00IEND\xaeB`\x82

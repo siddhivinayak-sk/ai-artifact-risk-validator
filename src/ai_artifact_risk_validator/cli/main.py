@@ -18,7 +18,13 @@ from pathlib import Path
 import click
 from rich.console import Console
 
-from ai_artifact_risk_validator.models.enums import GateAction
+from ai_artifact_risk_validator.models.enums import (
+    ArtifactType,
+    GateAction,
+    RiskCategory,
+    ScannerModule,
+    SeverityLabel,
+)
 
 # Exit code mapping per gate decision
 _EXIT_CODES: dict[GateAction, int] = {
@@ -244,6 +250,203 @@ def verify(
     # Determine exit code from gate decision
     exit_code = _EXIT_CODES.get(report.summary.gate_decision, 0)
     sys.exit(exit_code)
+
+
+@cli.command("list-risks")
+@click.option(
+    "--category",
+    type=click.Choice(
+        [c.value for c in RiskCategory],
+        case_sensitive=False,
+    ),
+    default=None,
+    help="Filter risks by category.",
+)
+@click.option(
+    "--artifact-type",
+    type=click.Choice(
+        [a.value for a in ArtifactType],
+        case_sensitive=False,
+    ),
+    default=None,
+    help="Filter risks by artifact type.",
+)
+@click.option(
+    "--severity",
+    type=click.Choice(
+        [s.value for s in SeverityLabel],
+        case_sensitive=False,
+    ),
+    default=None,
+    help="Filter risks by severity label.",
+)
+@click.option(
+    "--scanner",
+    type=click.Choice(
+        [m.value for m in ScannerModule],
+        case_sensitive=False,
+    ),
+    default=None,
+    help="Filter risks by scanner module.",
+)
+@click.option(
+    "--format",
+    "output_format",
+    type=click.Choice(["text", "json"], case_sensitive=False),
+    default="text",
+    help="Output format (text table or JSON).",
+)
+def list_risks(
+    category: str | None,
+    artifact_type: str | None,
+    severity: str | None,
+    scanner: str | None,
+    output_format: str,
+) -> None:
+    """List all known risk definitions with optional filters."""
+    import json
+
+    from rich.table import Table
+
+    from ai_artifact_risk_validator.models.enums import (
+        ArtifactType,
+        RiskCategory,
+        ScannerModule,
+        SeverityLabel,
+    )
+    from ai_artifact_risk_validator.risks.registry import RiskRegistry
+
+    console = Console()
+
+    registry = RiskRegistry()
+
+    # Build query kwargs from filters
+    query_kwargs: dict[str, object] = {}
+    if category is not None:
+        query_kwargs["category"] = RiskCategory(category)
+    if artifact_type is not None:
+        query_kwargs["artifact_type"] = ArtifactType(artifact_type)
+    if severity is not None:
+        query_kwargs["severity"] = SeverityLabel(severity)
+    if scanner is not None:
+        query_kwargs["scanner_module"] = ScannerModule(scanner)
+
+    risks = registry.query(**query_kwargs)  # type: ignore[arg-type]
+
+    # Sort by severity score (descending) then by ID
+    risks.sort(key=lambda r: (-r.severity_score, r.id))
+
+    if output_format == "json":
+        data = [
+            {
+                "id": r.id,
+                "title": r.title,
+                "severity": r.severity_label.value,
+                "severity_score": r.severity_score,
+                "category": r.category.value,
+                "artifact_types": [at.value for at in r.artifact_types],
+                "scanner_modules": [sm.value for sm in r.scanner_modules],
+            }
+            for r in risks
+        ]
+        click.echo(json.dumps(data, indent=2))
+    else:
+        table = Table(title=f"Risk Definitions ({len(risks)} results)")
+        table.add_column("ID", style="cyan", no_wrap=True)
+        table.add_column("Title", style="white")
+        table.add_column("Severity", style="bold")
+        table.add_column("Category", style="green")
+        table.add_column("Artifact Types", style="blue")
+        table.add_column("Scanners", style="magenta")
+
+        for r in risks:
+            severity_style = {
+                SeverityLabel.CRITICAL: "bold red",
+                SeverityLabel.HIGH: "red",
+                SeverityLabel.MEDIUM: "yellow",
+                SeverityLabel.LOW: "blue",
+                SeverityLabel.INFORMATIONAL: "dim",
+            }.get(r.severity_label, "")
+
+            table.add_row(
+                r.id,
+                r.title,
+                f"[{severity_style}]{r.severity_label.value} ({r.severity_score})[/{severity_style}]",
+                r.category.value,
+                ", ".join(at.value for at in r.artifact_types),
+                ", ".join(sm.value for sm in r.scanner_modules),
+            )
+
+        console.print(table)
+
+
+@cli.command()
+@click.option(
+    "--path",
+    "target_path",
+    type=click.Path(),
+    default=".",
+    help="Directory where .aav.yaml will be created (defaults to current directory).",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Overwrite existing .aav.yaml file if it exists.",
+)
+def init(target_path: str, force: bool) -> None:
+    """Generate a default .aav.yaml configuration file."""
+    from rich.panel import Panel
+
+    from ai_artifact_risk_validator.config.defaults import DEFAULT_CONFIG
+
+    console = Console()
+
+    target_dir = Path(target_path).resolve()
+    config_file = target_dir / ".aav.yaml"
+
+    if config_file.exists() and not force:
+        console.print(
+            Panel(
+                f"[red]Configuration file already exists:[/red] {config_file}\n"
+                "Use [bold]--force[/bold] to overwrite.",
+                title="Error",
+                border_style="red",
+            )
+        )
+        sys.exit(1)
+
+    # Build YAML content from defaults
+    import yaml
+
+    # Prepare a user-friendly config with comments via ordered structure
+    config_data: dict[str, object] = {
+        "log_level": DEFAULT_CONFIG["log_level"],
+        "severity_threshold": DEFAULT_CONFIG["severity_threshold"],
+        "max_file_size_bytes": DEFAULT_CONFIG["max_file_size_bytes"],
+        "parallel_files": DEFAULT_CONFIG["parallel_files"],
+        "parallel_scanners": DEFAULT_CONFIG["parallel_scanners"],
+        "file_include_patterns": DEFAULT_CONFIG["file_include_patterns"],
+        "file_exclude_patterns": DEFAULT_CONFIG["file_exclude_patterns"],
+        "enabled_scanners": DEFAULT_CONFIG["enabled_scanners"],
+        "disabled_scanners": DEFAULT_CONFIG["disabled_scanners"],
+        "custom_plugin_dirs": DEFAULT_CONFIG["custom_plugin_dirs"],
+        "suppression_rules": DEFAULT_CONFIG["suppression_rules"],
+        "gate_overrides": DEFAULT_CONFIG["gate_overrides"],
+        "custom_artifact_patterns": DEFAULT_CONFIG["custom_artifact_patterns"],
+    }
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    yaml_content = yaml.dump(config_data, default_flow_style=False, sort_keys=False)
+    config_file.write_text(yaml_content, encoding="utf-8")
+
+    console.print(
+        Panel(
+            f"[green]Configuration file created:[/green] {config_file}",
+            title="Success",
+            border_style="green",
+        )
+    )
 
 
 if __name__ == "__main__":

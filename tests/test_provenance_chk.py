@@ -367,6 +367,119 @@ class TestJsonContentDetection:
         assert "MCP-S4" in risk_ids
 
 
+class TestHashFormatValidation:
+    """Test validation of hash format when hash is declared."""
+
+    def test_valid_sha256_no_finding(self, scanner: ProvenanceChkScanner) -> None:
+        """Valid SHA-256 hash (64 hex chars) should not flag format error."""
+        content = (
+            "author: Jane\nversion: 1.0\ncreated: 2025-06-01\n"
+            "source: https://github.com/org/repo\n"
+            "sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n"
+            "license: MIT\nsignature: sig\nContent."
+        )
+        findings = scanner.scan(content, ArtifactType.SKILL, "/path/to/skill.md")
+        format_findings = [f for f in findings if "invalid length" in f.evidence]
+        assert len(format_findings) == 0
+
+    def test_invalid_sha256_too_short(self, scanner: ProvenanceChkScanner) -> None:
+        """SHA-256 with too few chars should flag format error with confidence 1.0."""
+        content = (
+            "author: Jane\nversion: 1.0\ncreated: 2025-06-01\n"
+            "source: https://github.com/org/repo\n"
+            "sha256: e3b0c44298fc1c149a\n"
+            "license: MIT\nsignature: sig\nContent."
+        )
+        findings = scanner.scan(content, ArtifactType.SKILL, "/path/to/skill.md")
+        format_findings = [f for f in findings if "invalid length" in f.evidence]
+        assert len(format_findings) > 0
+        assert format_findings[0].confidence == 1.0
+
+    def test_invalid_sha256_too_long(self, scanner: ProvenanceChkScanner) -> None:
+        """SHA-256 with too many chars should flag format error."""
+        content = (
+            "author: Jane\nversion: 1.0\ncreated: 2025-06-01\n"
+            "source: https://github.com/org/repo\n"
+            "sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855aabb\n"
+            "license: MIT\nsignature: sig\nContent."
+        )
+        findings = scanner.scan(content, ArtifactType.SKILL, "/path/to/skill.md")
+        format_findings = [f for f in findings if "invalid length" in f.evidence]
+        assert len(format_findings) > 0
+        assert format_findings[0].confidence == 1.0
+
+    def test_valid_sha512_no_finding(self, scanner: ProvenanceChkScanner) -> None:
+        """Valid SHA-512 hash (128 hex chars) should not flag format error."""
+        hash_512 = "a" * 128
+        content = (
+            "author: Jane\nversion: 1.0\ncreated: 2025-06-01\n"
+            "source: https://github.com/org/repo\n"
+            f"sha512: {hash_512}\n"
+            "license: MIT\nsignature: sig\nContent."
+        )
+        findings = scanner.scan(content, ArtifactType.SKILL, "/path/to/skill.md")
+        format_findings = [
+            f for f in findings if "SHA-512" in f.evidence and "invalid" in f.evidence
+        ]
+        assert len(format_findings) == 0
+
+    def test_invalid_sha512(self, scanner: ProvenanceChkScanner) -> None:
+        """SHA-512 with wrong length should flag format error with confidence 1.0."""
+        content = (
+            "author: Jane\nversion: 1.0\ncreated: 2025-06-01\n"
+            "source: https://github.com/org/repo\n"
+            "sha512: abcdef1234\n"
+            "license: MIT\nsignature: sig\nContent."
+        )
+        findings = scanner.scan(content, ArtifactType.SKILL, "/path/to/skill.md")
+        format_findings = [
+            f for f in findings if "SHA-512" in f.evidence and "invalid" in f.evidence
+        ]
+        assert len(format_findings) > 0
+        assert format_findings[0].confidence == 1.0
+
+    def test_signature_mismatch_confidence(self, scanner: ProvenanceChkScanner) -> None:
+        """Format mismatch findings should have confidence 1.0."""
+        content = (
+            "author: Jane\nversion: 1.0\ncreated: 2025-06-01\n"
+            "source: https://github.com/org/repo\n"
+            "sha256: deadbeef\n"
+            "license: MIT\nsignature: sig\nContent."
+        )
+        findings = scanner.scan(content, ArtifactType.SKILL, "/path/to/skill.md")
+        format_findings = [
+            f
+            for f in findings
+            if "invalid length" in f.evidence or "unexpected length" in f.evidence
+        ]
+        assert len(format_findings) > 0
+        for f in format_findings:
+            assert f.confidence == 1.0
+
+
+class TestVersionControlMetadata:
+    """Test detection of missing version control metadata."""
+
+    def test_missing_version_flags_gov2(self, scanner: ProvenanceChkScanner) -> None:
+        """Missing version field should flag GOV-2."""
+        content = "author: Jane\ncreated: 2025-06-01\nSome content."
+        findings = scanner.scan(content, ArtifactType.SKILL, "/path/to/skill.md")
+        risk_ids = [f.id for f in findings]
+        assert "GOV-2" in risk_ids
+
+    def test_version_present_no_gov2_for_version(self, scanner: ProvenanceChkScanner) -> None:
+        """Presence of version field should not flag GOV-2 for version."""
+        content = (
+            "author: Jane\nversion: 2.0.1\ncreated: 2025-06-01\n"
+            "source: https://github.com/org/repo\n"
+            "sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n"
+            "license: MIT\nsignature: sig\nContent."
+        )
+        findings = scanner.scan(content, ArtifactType.SKILL, "/path/to/skill.md")
+        gov2_findings = [f for f in findings if f.id == "GOV-2" and "version" in f.evidence.lower()]
+        assert len(gov2_findings) == 0
+
+
 class TestEdgeCases:
     """Test edge cases."""
 
@@ -387,3 +500,15 @@ class TestEdgeCases:
         content = "Some content."
         result = scanner.scan(content, ArtifactType.SKILL, "/path/to/skill.md")
         assert isinstance(result, list)
+
+    def test_non_applicable_type_not_in_list(self, scanner: ProvenanceChkScanner) -> None:
+        """Non-applicable artifact types should not be in applicable_artifact_types."""
+        types = scanner.applicable_artifact_types
+        assert ArtifactType.SOP not in types
+        assert ArtifactType.STEERING not in types
+        assert ArtifactType.HOOK not in types
+        assert ArtifactType.INSTRUCTION not in types
+        assert ArtifactType.MEMORY not in types
+        assert ArtifactType.EVAL_HARNESS not in types
+        assert ArtifactType.ORCHESTRATION not in types
+        assert ArtifactType.API_SCHEMA not in types
