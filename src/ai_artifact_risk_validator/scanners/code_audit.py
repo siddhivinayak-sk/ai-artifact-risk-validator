@@ -23,7 +23,13 @@ from ai_artifact_risk_validator.models import (
     ScannerModule,
     SeverityLabel,
 )
+from ai_artifact_risk_validator.models.language import DetectedLanguage
 from ai_artifact_risk_validator.scanners.base import BaseScanner
+from ai_artifact_risk_validator.scanners.generic_language_scanner import GenericLanguageScanner
+from ai_artifact_risk_validator.scanners.java_analyzer import JavaAnalyzer
+from ai_artifact_risk_validator.scanners.language_detector import LanguageDetector
+from ai_artifact_risk_validator.scanners.rust_analyzer import RustAnalyzer
+from ai_artifact_risk_validator.scanners.tsjs_enhanced import TSJSEnhancedPatterns
 
 # --- Risk metadata lookup ---
 _RISK_METADATA: dict[str, dict[str, Any]] = {
@@ -689,6 +695,11 @@ class CodeAuditScanner(BaseScanner):
         """Initialize the CodeAudit scanner with lazy-loaded optional deps."""
         self._bandit: Any | None = None
         self._bandit_loaded = False
+        self._language_detector = LanguageDetector()
+        self._ts_js_patterns = TSJSEnhancedPatterns()
+        self._rust_analyzer = RustAnalyzer()
+        self._java_analyzer = JavaAnalyzer()
+        self._generic_scanner = GenericLanguageScanner()
 
     @property
     def name(self) -> ScannerModule:
@@ -1126,8 +1137,10 @@ class CodeAuditScanner(BaseScanner):
     ) -> list[ScanFinding]:
         """Scan an artifact for code security risks.
 
-        Uses Python AST analysis for Python files and regex-based detection for
-        non-Python artifacts. Optionally integrates bandit for enhanced detection.
+        Uses LanguageDetector to determine the file's programming language and
+        routes to the appropriate analyzer. Python files use AST analysis,
+        TypeScript/JavaScript get both enhanced patterns and regex, Rust/Java/Kotlin
+        use dedicated analyzers, and other supported languages use the generic scanner.
 
         Args:
             artifact_content: The full text content of the artifact.
@@ -1142,18 +1155,45 @@ class CodeAuditScanner(BaseScanner):
         if not artifact_content.strip():
             return findings
 
-        # Use AST analysis for Python files
-        if _is_python_content(artifact_content, artifact_path):
-            ast_findings = self._scan_python_ast(artifact_content, artifact_type, artifact_path)
-            findings.extend(ast_findings)
+        language = self._language_detector.detect(artifact_path, artifact_content)
 
-            # If AST analysis found nothing, fall back to regex
-            if not ast_findings:
+        match language:
+            case DetectedLanguage.PYTHON:
+                ast_findings = self._scan_python_ast(artifact_content, artifact_type, artifact_path)
+                findings.extend(ast_findings)
+                if not ast_findings:
+                    findings.extend(
+                        self._scan_regex(artifact_content, artifact_type, artifact_path)
+                    )
+            case DetectedLanguage.TYPESCRIPT | DetectedLanguage.JAVASCRIPT:
+                findings.extend(
+                    self._ts_js_patterns.scan(artifact_content, artifact_type, artifact_path)
+                )
+                findings.extend(self._scan_regex(artifact_content, artifact_type, artifact_path))
+            case DetectedLanguage.RUST:
+                findings.extend(
+                    self._rust_analyzer.scan(artifact_content, artifact_type, artifact_path)
+                )
+            case DetectedLanguage.JAVA | DetectedLanguage.KOTLIN:
+                findings.extend(
+                    self._java_analyzer.scan(artifact_content, artifact_type, artifact_path)
+                )
+            case (
+                DetectedLanguage.GO
+                | DetectedLanguage.RUBY
+                | DetectedLanguage.CSHARP
+                | DetectedLanguage.PHP
+            ):
+                findings.extend(
+                    self._generic_scanner.scan(
+                        artifact_content, language, artifact_type, artifact_path
+                    )
+                )
+            case _:
+                # UNKNOWN language: apply regex patterns with confidence forced to 0.60
                 regex_findings = self._scan_regex(artifact_content, artifact_type, artifact_path)
+                for f in regex_findings:
+                    f.confidence = 0.60
                 findings.extend(regex_findings)
-        else:
-            # Non-Python: use regex-based detection
-            regex_findings = self._scan_regex(artifact_content, artifact_type, artifact_path)
-            findings.extend(regex_findings)
 
         return findings
