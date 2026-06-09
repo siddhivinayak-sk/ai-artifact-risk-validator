@@ -1,6 +1,6 @@
 """AI Artifact Risk Validator - Validates AI artifacts for security, performance, quality, compliance, and operational risks."""
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 
 from typing import Any

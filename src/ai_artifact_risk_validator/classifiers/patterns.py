@@ -127,6 +127,9 @@ PATH_PATTERNS: dict[ArtifactType, list[str]] = {
     ArtifactType.MCP: [
         r"mcp-servers/",
         r"mcp/",
+        r"/mcp\.json$",
+        r"\.kiro/settings/mcp\.json$",
+        r"mcp-server",
     ],
     ArtifactType.HOOK: [
         r"\.hooks/",
@@ -205,6 +208,12 @@ CONTENT_MARKERS: dict[ArtifactType, list[str]] = {
         r"\btransport\s*:",
         r"\"transport\"\s*:",
         r"\"tools\"\s*:\s*\[",
+        r"\"mcpServers\"\s*:",
+        r"\"mcpServers\"\s*:\s*\{",
+        r"\"command\"\s*:.*\"(npx|uvx|node|python|docker)\b",
+        r"\"protocolVersion\"\s*:",
+        r"\"serverInfo\"\s*:",
+        r"\"inputSchema\"\s*:",
     ],
     ArtifactType.HOOK: [
         r"\bevent\s*:",

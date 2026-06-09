@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ai-artifact-risk-validator"
-version = "0.3.0"
+version = "0.4.0"
 description = "Validates AI artifacts for security, performance, quality, compliance, and operational risks"
 readme = "README.md"
 license = "MIT"
@@ -96,6 +96,7 @@ compose_analyze = "ai_artifact_risk_validator.scanners.compose_analyze:ComposeAn
 portability_chk = "ai_artifact_risk_validator.scanners.portability_chk:PortabilityChkScanner"
 compliance_audit = "ai_artifact_risk_validator.scanners.compliance_audit:ComplianceAuditScanner"
 code_audit = "ai_artifact_risk_validator.scanners.code_audit:CodeAuditScanner"
+dynamic_scan = "ai_artifact_risk_validator.scanners.dynamic:DynamicScanner"
 
 [project.urls]
 Homepage = "https://github.com/ai-artifact-validator/ai-artifact-risk-validator"

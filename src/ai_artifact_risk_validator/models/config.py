@@ -51,3 +51,4 @@ class ValidatorConfig(BaseModel):
     gate_overrides: dict[str, GateAction] = Field(default_factory=dict)
     custom_artifact_patterns: dict[str, list[str]] = Field(default_factory=dict)
     html_report_path: str | None = None
+    allow_dynamic_scan: bool = False

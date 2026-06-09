@@ -74,6 +74,9 @@ class Validator:
         for plugin_dir in self._config.custom_plugin_dirs:
             self._scanner_registry.discover_plugin_dir(Path(plugin_dir))
 
+        # Configure DynamicScanner with allow_dynamic_scan and interactive settings
+        self._configure_dynamic_scanner()
+
     def verify(self, path: str | Path) -> ScanReport:
         """Scan the given path for AI artifact risks.
 
@@ -202,6 +205,26 @@ class Validator:
         from ai_artifact_risk_validator import __version__
 
         return __version__
+
+    def _configure_dynamic_scanner(self) -> None:
+        """Configure DynamicScanner with allow_dynamic_scan from ValidatorConfig.
+
+        Detects interactive mode based on whether stdin is a TTY.
+        Passes the CLI flag value and interactive mode through DynamicScanConfig.
+        """
+        import sys
+
+        from ai_artifact_risk_validator.models.enums import ScannerModule
+        from ai_artifact_risk_validator.models.mcp_models import DynamicScanConfig
+        from ai_artifact_risk_validator.scanners.dynamic.scanner import DynamicScanner
+
+        scanner = self._scanner_registry.get_scanner_by_name(ScannerModule.DYNAMIC_SCAN)
+        if scanner is not None and isinstance(scanner, DynamicScanner):
+            interactive = sys.stdin.isatty()
+            scanner._config = DynamicScanConfig(
+                allow_dynamic_scan=self._config.allow_dynamic_scan,
+                interactive=interactive,
+            )
 
     def _error_report(
         self, artifact_path: str, error_message: str, scan_id: str | None = None

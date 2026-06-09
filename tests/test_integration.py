@@ -38,7 +38,7 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 ARTIFACTS_DIR = Path(__file__).parent / "fixtures" / "artifacts"
 
 # Common CLI args to suppress log output in tests (logs go to stdout in CliRunner)
-_QUIET_ARGS = ["--log-level", "CRITICAL"]
+_QUIET_ARGS = ["--log-level", "CRITICAL", "--format", "json"]
 
 
 def _register_builtin_scanners(validator: Validator) -> None:
@@ -252,15 +252,25 @@ class TestCLIVerifyCommand:
         assert result.exit_code == 0
 
     def test_cli_verify_json_format_default(self, runner, tmp_path):
-        """CLI verify outputs valid JSON by default."""
+        """CLI verify default format is text; JSON requires --format json."""
         (tmp_path / "test.prompt.md").write_text(
             "---\nname: test\n---\n\n## System Prompt\n\nBe helpful.\n",
             encoding="utf-8",
         )
-        result = runner.invoke(cli, ["verify", str(tmp_path), *_QUIET_ARGS])
-        # Output should be parseable JSON
+        # Without --format json (just --log-level), output should be text
+        result = runner.invoke(cli, ["verify", str(tmp_path), "--log-level", "CRITICAL"])
         output = result.output.strip()
-        parsed = json.loads(output)
+        assert len(output) > 0
+        # Text output should not be valid JSON
+        try:
+            json.loads(output)
+            is_json = True
+        except json.JSONDecodeError:
+            is_json = False
+        assert not is_json, "Default format should be text, not JSON"
+        # Verify JSON still works with explicit --format json
+        result_json = runner.invoke(cli, ["verify", str(tmp_path), *_QUIET_ARGS])
+        parsed = json.loads(result_json.output.strip())
         assert "scan_id" in parsed
         assert "findings" in parsed
         assert "summary" in parsed
@@ -276,9 +286,10 @@ class TestCLIVerifyCommand:
             [
                 "verify",
                 str(tmp_path),
+                "--log-level",
+                "CRITICAL",
                 "--format",
                 "text",
-                *_QUIET_ARGS,
             ],
         )
         assert result.exit_code in (0, 2)
@@ -302,6 +313,8 @@ class TestCLIVerifyCommand:
                 str(scan_dir),
                 "--output",
                 str(output_file),
+                "--format",
+                "json",
                 *_QUIET_ARGS,
             ],
         )
@@ -338,6 +351,8 @@ class TestCLIVerifyCommand:
                 str(tmp_path),
                 "--severity-threshold",
                 "9",
+                "--format",
+                "json",
                 *_QUIET_ARGS,
             ],
         )
@@ -1140,9 +1155,10 @@ class TestCLIWithArtifactsFixtures:
             [
                 "verify",
                 str(ARTIFACTS_DIR / "agents" / "agent_risky.md"),
+                "--log-level",
+                "CRITICAL",
                 "--format",
                 "text",
-                *_QUIET_ARGS,
             ],
         )
         assert result.exit_code in (0, 1, 2)
