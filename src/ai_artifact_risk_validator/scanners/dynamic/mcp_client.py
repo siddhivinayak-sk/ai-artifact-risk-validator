@@ -57,6 +57,9 @@ class MCPClient:
         self._process: asyncio.subprocess.Process | None = None
         self._request_id = 0
         self._reader_lock = asyncio.Lock()
+        self._session_id: str | None = None
+        self._server_capabilities: dict[str, Any] = {}
+        self._server_info: dict[str, Any] = {}
 
     @property
     def config(self) -> MCPServerConfig:
@@ -67,6 +70,16 @@ class MCPClient:
     def connected(self) -> bool:
         """Return whether the client is currently connected."""
         return self._connected
+
+    @property
+    def server_capabilities(self) -> dict[str, Any]:
+        """Return the server's declared capabilities from initialization."""
+        return self._server_capabilities
+
+    @property
+    def server_info(self) -> dict[str, Any]:
+        """Return the server's info (name, version) from initialization."""
+        return self._server_info
 
     async def connect(self) -> bool:
         """Establish connection to MCP server.
@@ -272,8 +285,30 @@ class MCPClient:
         """Clean up connection.
 
         For stdio transport, terminates the subprocess.
-        For HTTP/SSE transport, closes any open sessions.
+        For HTTP/SSE transport, sends HTTP DELETE to terminate the session (per MCP spec).
         """
+        # HTTP session cleanup: send DELETE with session ID per MCP spec
+        if self._config.transport != "stdio" and self._session_id and self._config.url:
+            try:
+                import urllib.error
+                import urllib.request
+
+                req = urllib.request.Request(  # noqa: S310
+                    self._config.url,
+                    method="DELETE",
+                )
+                req.add_header("Mcp-Session-Id", self._session_id)
+                try:
+                    with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310
+                        _ = resp.read()
+                except urllib.error.HTTPError:
+                    pass  # 405 Method Not Allowed is acceptable per spec
+                except Exception:
+                    pass
+            except Exception:
+                pass  # Best-effort session cleanup
+            self._session_id = None
+
         if self._process is not None:
             try:
                 self._process.terminate()
@@ -329,11 +364,11 @@ class MCPClient:
                 self._send_request(
                     "initialize",
                     params={
-                        "protocolVersion": "2024-11-05",
+                        "protocolVersion": "2025-03-26",
                         "capabilities": {},
                         "clientInfo": {
                             "name": "ai-artifact-risk-validator",
-                            "version": "1.0.0",
+                            "version": "0.4.0",
                         },
                     },
                 ),
@@ -342,6 +377,9 @@ class MCPClient:
 
             if init_response is not None and "result" in init_response:
                 self._connected = True
+                result = init_response["result"]
+                self._server_capabilities = result.get("capabilities", {})
+                self._server_info = result.get("serverInfo", {})
                 # Send initialized notification
                 await self._send_notification("notifications/initialized")
                 logger.info(
@@ -396,19 +434,25 @@ class MCPClient:
             import urllib.error
             import urllib.request
 
-            # Use a simple HEAD/GET request to verify reachability
-            # Run in executor to avoid blocking the event loop
+            # Use a simple POST request to verify reachability
+            # MCP Streamable HTTP uses POST for JSON-RPC requests
             loop = asyncio.get_event_loop()
 
             def _check_url() -> bool:
                 req = urllib.request.Request(  # noqa: S310
                     self._config.url,  # type: ignore[arg-type]
-                    method="GET",
+                    method="POST",
+                    data=b"{}",
                 )
-                req.add_header("Accept", "application/json")
+                req.add_header("Content-Type", "application/json")
+                req.add_header("Accept", "application/json, text/event-stream")
                 try:
                     with urllib.request.urlopen(req, timeout=self._connection_timeout) as resp:  # noqa: S310
                         return bool(resp.status < 500)
+                except urllib.error.HTTPError as e:
+                    # 4xx errors (400, 405, 406, etc.) mean server is reachable
+                    # but the request wasn't valid — that's fine for a check
+                    return bool(e.code < 500)
                 except urllib.error.URLError:
                     return False
                 except Exception:
@@ -421,12 +465,26 @@ class MCPClient:
 
             if reachable:
                 self._connected = True
-                logger.info(
-                    "Connected to MCP server '%s' via HTTP/SSE at %s",
-                    self._config.name,
-                    self._config.url,
-                )
-                return True
+                # Send MCP initialize handshake and capture session ID
+                init_result = await self._send_http_initialize()
+                if init_result:
+                    # Send initialized notification
+                    await self._send_notification("notifications/initialized")
+                    logger.info(
+                        "Connected to MCP server '%s' via HTTP/SSE at %s",
+                        self._config.name,
+                        self._config.url,
+                    )
+                    return True
+                else:
+                    # Server is reachable but didn't respond to initialize
+                    # Still proceed — some servers may not require initialization
+                    logger.info(
+                        "Connected to MCP server '%s' via HTTP/SSE at %s (no init handshake)",
+                        self._config.name,
+                        self._config.url,
+                    )
+                    return True
             else:
                 logger.warning(
                     "HTTP/SSE server '%s' at %s is not reachable",
@@ -448,6 +506,79 @@ class MCPClient:
                 self._config.name,
                 exc,
             )
+            return False
+
+    async def _send_http_initialize(self) -> bool:
+        """Send MCP initialize request via HTTP and capture session ID.
+
+        Returns:
+            True if initialization succeeded (server returned a result).
+        """
+        import urllib.error
+        import urllib.request
+
+        request_id = self._next_request_id()
+        request = {
+            "jsonrpc": "2.0",
+            "method": "initialize",
+            "id": request_id,
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {
+                    "name": "ai-artifact-risk-validator",
+                    "version": "0.4.0",
+                },
+            },
+        }
+
+        loop = asyncio.get_event_loop()
+
+        def _do_init() -> bool:
+            data = json.dumps(request).encode("utf-8")
+            req = urllib.request.Request(  # noqa: S310
+                self._config.url,  # type: ignore[arg-type]
+                data=data,
+                method="POST",
+            )
+            req.add_header("Content-Type", "application/json")
+            req.add_header("Accept", "application/json, text/event-stream")
+            try:
+                with urllib.request.urlopen(req, timeout=self._connection_timeout) as resp:  # noqa: S310
+                    # Capture session ID from response headers
+                    session_id = resp.headers.get("mcp-session-id")
+                    if session_id:
+                        self._session_id = session_id
+
+                    content_type = resp.headers.get("Content-Type", "")
+                    body = resp.read().decode("utf-8")
+
+                    # Parse response (may be SSE or plain JSON)
+                    if "text/event-stream" in content_type:
+                        parsed = self._parse_sse_response(body)
+                    else:
+                        parsed = json.loads(body)
+
+                    if parsed is not None and "result" in parsed:
+                        result = parsed["result"]
+                        self._server_capabilities = result.get("capabilities", {})
+                        self._server_info = result.get("serverInfo", {})
+                        return True
+                    return False
+            except Exception as exc:
+                logger.debug(
+                    "HTTP initialize failed for server '%s': %s",
+                    self._config.name,
+                    exc,
+                )
+                return False
+
+        try:
+            return await asyncio.wait_for(
+                loop.run_in_executor(None, _do_init),
+                timeout=self._connection_timeout,
+            )
+        except asyncio.TimeoutError:
             return False
 
     def _next_request_id(self) -> int:
@@ -512,6 +643,41 @@ class MCPClient:
                     self._config.name,
                     exc,
                 )
+        elif self._config.transport != "stdio" and self._config.url:
+            # HTTP transport: POST the notification, expect 202 Accepted
+            try:
+                import urllib.error
+                import urllib.request
+
+                loop = asyncio.get_event_loop()
+
+                def _send_http_notification() -> None:
+                    data = json.dumps(notification).encode("utf-8")
+                    req = urllib.request.Request(  # noqa: S310
+                        self._config.url,  # type: ignore[arg-type]
+                        data=data,
+                        method="POST",
+                    )
+                    req.add_header("Content-Type", "application/json")
+                    req.add_header("Accept", "application/json, text/event-stream")
+                    if self._session_id:
+                        req.add_header("Mcp-Session-Id", self._session_id)
+                    try:
+                        with urllib.request.urlopen(req, timeout=self._per_server_timeout) as resp:  # noqa: S310
+                            _ = resp.read()  # drain response body
+                    except urllib.error.HTTPError:
+                        pass  # 202 Accepted or other status is fine for notifications
+                    except Exception:
+                        pass
+
+                await loop.run_in_executor(None, _send_http_notification)
+            except Exception as exc:
+                logger.warning(
+                    "Failed to send notification '%s' to HTTP server '%s': %s",
+                    method,
+                    self._config.name,
+                    exc,
+                )
 
     async def _send_stdio_request(self, request: dict[str, Any]) -> dict[str, Any] | None:
         """Send request via stdio transport and read response."""
@@ -556,7 +722,11 @@ class MCPClient:
                 return None
 
     async def _send_http_request(self, request: dict[str, Any]) -> dict[str, Any] | None:
-        """Send request via HTTP transport."""
+        """Send request via HTTP transport.
+
+        Handles both plain JSON responses and SSE (text/event-stream) responses.
+        For SSE, extracts the JSON-RPC response from the first 'message' event data line.
+        """
         if not self._config.url:
             return None
 
@@ -574,10 +744,19 @@ class MCPClient:
                     method="POST",
                 )
                 req.add_header("Content-Type", "application/json")
-                req.add_header("Accept", "application/json")
+                req.add_header("Accept", "application/json, text/event-stream")
+                if self._session_id:
+                    req.add_header("Mcp-Session-Id", self._session_id)
                 try:
                     with urllib.request.urlopen(req, timeout=self._per_server_timeout) as resp:  # noqa: S310
+                        content_type = resp.headers.get("Content-Type", "")
                         body = resp.read().decode("utf-8")
+
+                        # Handle SSE response format
+                        if "text/event-stream" in content_type:
+                            return self._parse_sse_response(body)
+
+                        # Plain JSON response
                         parsed: dict[str, Any] = json.loads(body)
                         return parsed
                 except urllib.error.URLError as exc:
@@ -603,3 +782,31 @@ class MCPClient:
                 exc,
             )
             return None
+
+    @staticmethod
+    def _parse_sse_response(body: str) -> dict[str, Any] | None:
+        """Parse an SSE response body to extract the JSON-RPC message.
+
+        SSE format:
+            event: message
+            data: {"jsonrpc":"2.0","id":1,"result":{...}}
+
+        Args:
+            body: Raw SSE response body.
+
+        Returns:
+            Parsed JSON-RPC response dict, or None if parsing fails.
+        """
+        for line in body.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("data:"):
+                data_content = stripped[5:].strip()
+                if data_content:
+                    try:
+                        parsed: dict[str, Any] = json.loads(data_content)
+                        # Return the first valid JSON-RPC response
+                        if "jsonrpc" in parsed:
+                            return parsed
+                    except json.JSONDecodeError:
+                        continue
+        return None

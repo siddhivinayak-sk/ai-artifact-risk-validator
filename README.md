@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 
-A comprehensive Python package that validates AI artifacts for security, performance, quality, compliance, and operational risks before peer sharing. It implements a risk framework covering **190 risks** across **14 artifact types** and **13 scanner modules**.
+A comprehensive Python package that validates AI artifacts for security, performance, quality, compliance, and operational risks before peer sharing. It implements a risk framework covering **198 risks** across **14 artifact types** and **14 scanner modules**, including dynamic runtime analysis of live MCP servers.
 
 ---
 
@@ -27,8 +27,10 @@ The AI Artifact Risk Validator scans directories containing AI artifacts (prompt
 
 Key features:
 
-- **190 risk definitions** across 14 artifact types and 6 cross-cutting dimensions
-- **13 scanner modules** covering secrets, injection, permissions, tokens, schema, dependencies, quality, provenance, bias, composability, portability, compliance, and code security
+- **198 risk definitions** across 14 artifact types and 6 cross-cutting dimensions
+- **14 scanner modules** covering secrets, injection, permissions, tokens, schema, dependencies, quality, provenance, bias, composability, portability, compliance, code security, and dynamic MCP analysis
+- **Dynamic MCP scanning** — connects to live MCP servers, discovers tools, and detects prompt injection, tool poisoning, tool shadowing, toxic flows, and path traversal vulnerabilities
+- **Multi-language static scanning** — Python (AST), TypeScript/JavaScript, Rust, Java/Kotlin, Go, Ruby, C#, PHP
 - **Plugin architecture** — extend with custom scanners via entry points or plugin directories
 - **Parallel execution** — concurrent file and scanner processing for fast scans
 - **Configurable gates** — BLOCK/WARN/INFO decisions with confidence-based downgrade
@@ -144,14 +146,14 @@ The CLI provides three commands: `verify`, `list-risks`, and `init`.
 ```bash
 # --- verify command ---
 
-# Scan a directory and output JSON report
+# Scan a directory (default output is text format)
 ai-artifact-validator verify ./my-artifacts
 
-# Output as formatted text
-ai-artifact-validator verify ./my-artifacts --format text
+# Output as JSON
+ai-artifact-validator verify ./my-artifacts --format json
 
 # Save report to file
-ai-artifact-validator verify ./my-artifacts --output report.json
+ai-artifact-validator verify ./my-artifacts --format json --output report.json
 
 # Use specific scanners only
 ai-artifact-validator verify ./my-artifacts --scanners SecretScan,InjectionDet,CodeAudit
@@ -174,22 +176,30 @@ ai-artifact-validator verify ./my-artifacts --format html
 # Save HTML report to file
 ai-artifact-validator verify ./my-artifacts --format html --output report.html
 
+# --- Dynamic MCP scanning ---
+
+# Scan an mcp.json file with dynamic analysis (connects to live servers)
+ai-artifact-validator verify ./mcp.json --allow-dynamic-scan
+
+# Dynamic scan with verbose logging
+ai-artifact-validator verify ./mcp.json --allow-dynamic-scan --log-level debug
+
 # --- list-risks command ---
 
-# List all 190 known risk definitions
+# List all known risk definitions
 ai-artifact-validator list-risks
 
 # Filter by category
 ai-artifact-validator list-risks --category Security
 
 # Filter by artifact type
-ai-artifact-validator list-risks --artifact-type prompt
+ai-artifact-validator list-risks --artifact-type mcp
 
 # Filter by severity level
 ai-artifact-validator list-risks --severity Critical
 
 # Filter by scanner module
-ai-artifact-validator list-risks --scanner InjectionDet
+ai-artifact-validator list-risks --scanner DynamicScan
 
 # Output as JSON
 ai-artifact-validator list-risks --category Security --format json
@@ -634,7 +644,8 @@ The validator includes 13 scanner modules, each specializing in a category of ri
 | **ComposeAnalyze** | Cross-artifact contradiction and composition analysis | `networkx`, `sentence-transformers` |
 | **PortabilityChk** | Model-specific syntax and portability concerns | — |
 | **ComplianceAudit** | License, data residency, and regulatory compliance | `presidio-analyzer` |
-| **CodeAudit** | Dangerous function detection, AST analysis | `bandit` |
+| **CodeAudit** | Multi-language static analysis (Python AST, TS/JS, Rust, Java/Kotlin, Go, Ruby, C#, PHP) | `bandit` |
+| **DynamicScan** | Live MCP server scanning: tool discovery, description analysis, attack simulation | — |
 
 ### Scanner-to-artifact-type coverage
 

@@ -30,12 +30,12 @@ _all_risks: list[RiskDefinition] = list(_registry.query())
 
 
 class TestRiskRegistryCompleteness:
-    """Tests that the risk registry contains exactly 190 risks with unique IDs."""
+    """Tests that the risk registry contains exactly 198 risks with unique IDs."""
 
-    def test_total_risk_count_is_exactly_190(self):
+    def test_total_risk_count_is_exactly_198(self):
         """**Validates: Requirements 11.1, 11.2**"""
-        assert _registry.total_count == 190, (
-            f"Expected 190 total risks, got {_registry.total_count}"
+        assert _registry.total_count == 198, (
+            f"Expected 198 total risks, got {_registry.total_count}"
         )
 
     def test_all_risk_ids_are_unique(self):

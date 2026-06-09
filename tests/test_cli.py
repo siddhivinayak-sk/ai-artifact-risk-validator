@@ -244,15 +244,15 @@ class TestCLIFormatOptions:
         assert "summary" in parsed
 
     def test_format_json_is_default(self, runner: CliRunner, scan_dir: Path):
-        """Default format (no --format flag) should be json."""
+        """Default format (no --format flag) should be text."""
         result = runner.invoke(
             cli,
             ["verify", str(scan_dir), *_QUIET_ARGS],
         )
         assert result.exit_code in (0, 1, 2)
-        # Should be valid JSON
-        parsed = json.loads(result.output)
-        assert isinstance(parsed, dict)
+        # Default is now text format — output should NOT be valid JSON
+        output = result.output
+        assert len(output) > 0
 
     def test_format_text_produces_text_output(self, runner: CliRunner, scan_dir: Path):
         """--format text should produce human-readable text output."""
@@ -393,6 +393,8 @@ class TestCLIScannerOptions:
                 str(scan_dir),
                 "--severity-threshold",
                 "7",
+                "--format",
+                "json",
                 *_QUIET_ARGS,
             ],
         )

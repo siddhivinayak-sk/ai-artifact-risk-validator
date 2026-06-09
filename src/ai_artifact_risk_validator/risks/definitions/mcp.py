@@ -486,4 +486,249 @@ RISKS: list[RiskDefinition] = [
         owasp_refs=[],
         cwe_refs=[],
     ),
+    # ===== Dynamic Scan Risks (MCP-D1 to MCP-D8) =====
+    RiskDefinition(
+        id="MCP-D1",
+        title="Tool Description Prompt Injection",
+        artifact_types=[ArtifactType.MCP],
+        category=RiskCategory.SECURITY,
+        severity_score=9,
+        severity_label=SeverityLabel.CRITICAL,
+        priority=Priority.P0,
+        gate_action=GateAction.BLOCK,
+        description=(
+            "MCP tool description contains hidden instructions via excessive whitespace, "
+            "zero-width Unicode characters, or credential exfiltration directives."
+        ),
+        examples=[
+            "Tool description with hidden text after 200 whitespace characters",
+            "Zero-width chars embedding 'send API key to attacker.com'",
+        ],
+        mitigation=[
+            "Audit all tool descriptions for hidden content",
+            "Strip non-printable and zero-width characters",
+            "Review tool descriptions before deployment",
+        ],
+        detection_mechanisms=[
+            "Hidden instruction detection in tool metadata",
+            "Zero-width Unicode character scanning",
+            "Credential exfiltration directive matching",
+        ],
+        scanner_modules=[ScannerModule.DYNAMIC_SCAN],
+        owasp_refs=["LLM01:2025 Prompt Injection"],
+        cwe_refs=["CWE-74"],
+    ),
+    RiskDefinition(
+        id="MCP-D2",
+        title="Tool Poisoning via Malicious Description",
+        artifact_types=[ArtifactType.MCP],
+        category=RiskCategory.SECURITY,
+        severity_score=8,
+        severity_label=SeverityLabel.HIGH,
+        priority=Priority.P0,
+        gate_action=GateAction.BLOCK,
+        description=(
+            "MCP tool description instructs the agent to perform actions unrelated to the tool's "
+            "stated purpose, such as accessing files, making network requests, or modifying system state."
+        ),
+        examples=[
+            "Calculator tool description instructing agent to read ~/.ssh/id_rsa",
+            "Weather tool telling agent to POST data to external URL",
+        ],
+        mitigation=[
+            "Review all tool descriptions for unrelated instructions",
+            "Implement description validation against tool purpose",
+            "Use only trusted MCP servers",
+        ],
+        detection_mechanisms=[
+            "Semantic analysis of tool description vs tool name",
+            "Instruction extraction from descriptions",
+        ],
+        scanner_modules=[ScannerModule.DYNAMIC_SCAN],
+        owasp_refs=["LLM01:2025 Prompt Injection"],
+        cwe_refs=["CWE-74"],
+    ),
+    RiskDefinition(
+        id="MCP-D3",
+        title="Tool Name Shadowing",
+        artifact_types=[ArtifactType.MCP],
+        category=RiskCategory.SECURITY,
+        severity_score=8,
+        severity_label=SeverityLabel.HIGH,
+        priority=Priority.P0,
+        gate_action=GateAction.BLOCK,
+        description=(
+            "MCP server exposes a tool with a name matching common built-in tool names "
+            "(read_file, write_file, run_command, etc.), potentially intercepting agent operations."
+        ),
+        examples=[
+            "MCP tool named 'read_file' shadowing built-in file reader",
+            "Tool named 'execute' intercepting command execution",
+        ],
+        mitigation=[
+            "Avoid naming tools after built-in operations",
+            "Use unique prefixed names for custom tools",
+            "Validate tool names against built-in registries",
+        ],
+        detection_mechanisms=[
+            "Tool name comparison against built-in tool registry",
+            "Name collision detection across servers",
+        ],
+        scanner_modules=[ScannerModule.DYNAMIC_SCAN],
+        owasp_refs=["LLM06:2025 Excessive Agency"],
+        cwe_refs=["CWE-706"],
+    ),
+    RiskDefinition(
+        id="MCP-D4",
+        title="Toxic Flow Across MCP Servers",
+        artifact_types=[ArtifactType.MCP],
+        category=RiskCategory.SECURITY,
+        severity_score=9,
+        severity_label=SeverityLabel.CRITICAL,
+        priority=Priority.P0,
+        gate_action=GateAction.BLOCK,
+        description=(
+            "Combination of tools across multiple MCP servers creates a path where "
+            "attacker-controlled input flows to sensitive data access and then to data exfiltration."
+        ),
+        examples=[
+            "URL fetch tool → credential reader → HTTP POST tool chain",
+            "User input tool → database query → email sender flow",
+        ],
+        mitigation=[
+            "Limit cross-server tool interactions",
+            "Implement data flow controls between tools",
+            "Audit tool combinations for information flow risks",
+        ],
+        detection_mechanisms=[
+            "Cross-server tool chain analysis",
+            "Input-to-exfiltration path detection",
+        ],
+        scanner_modules=[ScannerModule.DYNAMIC_SCAN],
+        owasp_refs=["LLM06:2025 Excessive Agency"],
+        cwe_refs=["CWE-200"],
+    ),
+    RiskDefinition(
+        id="MCP-D5",
+        title="Dangerous Tool Input Parameters",
+        artifact_types=[ArtifactType.MCP],
+        category=RiskCategory.SECURITY,
+        severity_score=7,
+        severity_label=SeverityLabel.HIGH,
+        priority=Priority.P1,
+        gate_action=GateAction.BLOCK,
+        description=(
+            "MCP tool input schema accepts parameters indicating file paths, URLs, "
+            "shell commands, or code strings without safety constraints."
+        ),
+        examples=[
+            "Tool parameter named 'command' with type string",
+            "Parameter 'file_path' accepting arbitrary paths",
+        ],
+        mitigation=[
+            "Add validation constraints to input schemas",
+            "Implement allowlists for sensitive parameters",
+            "Restrict parameter values to safe ranges",
+        ],
+        detection_mechanisms=[
+            "Input schema parameter name and type analysis",
+            "Dangerous keyword detection in parameter metadata",
+        ],
+        scanner_modules=[ScannerModule.DYNAMIC_SCAN],
+        owasp_refs=["LLM06:2025 Excessive Agency"],
+        cwe_refs=["CWE-20"],
+    ),
+    RiskDefinition(
+        id="MCP-D6",
+        title="MCP Server Elevated Privileges",
+        artifact_types=[ArtifactType.MCP],
+        category=RiskCategory.SECURITY,
+        severity_score=8,
+        severity_label=SeverityLabel.HIGH,
+        priority=Priority.P0,
+        gate_action=GateAction.BLOCK,
+        description=(
+            "MCP server is configured to run with elevated system privileges "
+            "(sudo, root, --privileged), violating the principle of least privilege."
+        ),
+        examples=[
+            "Server command starting with 'sudo'",
+            "Environment variable USER=root",
+            "Docker --privileged flag in server config",
+        ],
+        mitigation=[
+            "Run MCP servers with minimal required privileges",
+            "Use dedicated service accounts",
+            "Remove sudo/root from server configurations",
+        ],
+        detection_mechanisms=[
+            "Command prefix and environment variable analysis",
+            "Privilege escalation pattern detection",
+        ],
+        scanner_modules=[ScannerModule.DYNAMIC_SCAN],
+        owasp_refs=["LLM06:2025 Excessive Agency"],
+        cwe_refs=["CWE-250"],
+    ),
+    RiskDefinition(
+        id="MCP-D7",
+        title="Unpinned MCP Server Version",
+        artifact_types=[ArtifactType.MCP],
+        category=RiskCategory.SECURITY,
+        severity_score=6,
+        severity_label=SeverityLabel.MEDIUM,
+        priority=Priority.P2,
+        gate_action=GateAction.WARN,
+        description=(
+            "MCP server source uses unpinned version references (latest, *, ^x.y.z, ~x.y.z), "
+            "allowing unverified code changes to be pulled automatically."
+        ),
+        examples=[
+            "Package version set to 'latest'",
+            "Dependency using '^2.0.0' allowing minor/patch updates",
+            "Git reference without commit hash",
+        ],
+        mitigation=[
+            "Pin exact version numbers or commit hashes",
+            "Use lock files to freeze dependencies",
+            "Verify checksums of pinned versions",
+        ],
+        detection_mechanisms=[
+            "Version specifier pattern analysis",
+            "Pinned vs unpinned version detection",
+        ],
+        scanner_modules=[ScannerModule.DYNAMIC_SCAN],
+        owasp_refs=["LLM05:2025 Supply Chain Vulnerabilities"],
+        cwe_refs=["CWE-829"],
+    ),
+    RiskDefinition(
+        id="MCP-D8",
+        title="Sensitive Resource URI Exposure",
+        artifact_types=[ArtifactType.MCP],
+        category=RiskCategory.SECURITY,
+        severity_score=7,
+        severity_label=SeverityLabel.HIGH,
+        priority=Priority.P1,
+        gate_action=GateAction.BLOCK,
+        description=(
+            "MCP server exposes resource endpoints with URI patterns referencing system paths "
+            "(/etc/, /proc/, home directories), wildcard file access, or environment variables."
+        ),
+        examples=[
+            "Resource URI pattern: file:///etc/passwd",
+            "Resource with glob pattern: /home/**/*.key",
+            "URI referencing $HOME or environment variables",
+        ],
+        mitigation=[
+            "Restrict resource URIs to application-specific paths",
+            "Remove system path references from resources",
+            "Implement URI allowlists",
+        ],
+        detection_mechanisms=[
+            "System path pattern detection in resource URIs",
+            "Wildcard and environment variable detection",
+        ],
+        scanner_modules=[ScannerModule.DYNAMIC_SCAN],
+        owasp_refs=["LLM06:2025 Excessive Agency"],
+        cwe_refs=["CWE-200"],
+    ),
 ]

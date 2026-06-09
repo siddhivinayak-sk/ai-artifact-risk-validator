@@ -53,7 +53,7 @@ def cli() -> None:
     "--format",
     "output_format",
     type=click.Choice(["json", "text", "html"], case_sensitive=False),
-    default="json",
+    default="text",
     help="Output format for the report.",
 )
 @click.option(
