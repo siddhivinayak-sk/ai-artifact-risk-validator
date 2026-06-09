@@ -10,13 +10,27 @@ from ai_artifact_risk_validator.models.enums import (
     SeverityLabel,
 )
 from ai_artifact_risk_validator.models.findings import FindingLocation, ScanFinding
+from ai_artifact_risk_validator.models.language import DetectedLanguage
+from ai_artifact_risk_validator.models.mcp_models import (
+    DynamicScanConfig,
+    MCPResourceInfo,
+    MCPServerConfig,
+    MCPServerInventory,
+    MCPToolInfo,
+)
 from ai_artifact_risk_validator.models.report import ScanReport, ScanSummary
 from ai_artifact_risk_validator.models.risk import RiskDefinition
 
 __all__ = [
     "ArtifactType",
+    "DetectedLanguage",
+    "DynamicScanConfig",
     "FindingLocation",
     "GateAction",
+    "MCPResourceInfo",
+    "MCPServerConfig",
+    "MCPServerInventory",
+    "MCPToolInfo",
     "Priority",
     "RiskCategory",
     "RiskDefinition",

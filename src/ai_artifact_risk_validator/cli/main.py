@@ -103,6 +103,12 @@ def cli() -> None:
     default=None,
     help="Number of parallel file workers (1-32).",
 )
+@click.option(
+    "--allow-dynamic-scan",
+    is_flag=True,
+    default=False,
+    help="Allow dynamic scanning of live MCP servers. Required in CI/CD mode.",
+)
 def verify(
     path: str,
     output: str | None,
@@ -114,6 +120,7 @@ def verify(
     no_ignore: bool,
     no_cache: bool,
     parallel: int | None,
+    allow_dynamic_scan: bool,
 ) -> None:
     """Scan PATH for AI artifact risks and produce a validation report.
 
@@ -154,6 +161,9 @@ def verify(
     if no_cache:
         # Disable caching by not setting a cache directory
         cli_overrides["cache_dir"] = None
+
+    if allow_dynamic_scan:
+        cli_overrides["allow_dynamic_scan"] = True
 
     # Load configuration using ConfigManager with proper precedence
     config_manager = ConfigManager()

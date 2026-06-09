@@ -86,3 +86,4 @@ class ScannerModule(str, Enum):
     PORTABILITY_CHK = "PortabilityChk"
     COMPLIANCE_AUDIT = "ComplianceAudit"
     CODE_AUDIT = "CodeAudit"
+    DYNAMIC_SCAN = "DynamicScan"

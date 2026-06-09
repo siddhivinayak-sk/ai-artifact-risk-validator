@@ -53,6 +53,7 @@ _FLAT_SCHEMA_KEYS = {
     "cache_dir",
     "token_budget_limit",
     "html_report_path",
+    "allow_dynamic_scan",
 }
 
 # Keys that indicate nested (design doc) YAML format
@@ -205,6 +206,8 @@ def _config_dict_to_validator_config(data: dict[str, Any]) -> dict[str, Any]:
         kwargs["token_budget_limit"] = data["token_budget_limit"]
     if "html_report_path" in data:
         kwargs["html_report_path"] = str(data["html_report_path"])
+    if "allow_dynamic_scan" in data:
+        kwargs["allow_dynamic_scan"] = bool(data["allow_dynamic_scan"])
 
     # List fields
     if "file_include_patterns" in data:
