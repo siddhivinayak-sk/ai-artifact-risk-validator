@@ -95,7 +95,8 @@ class TestListRisksStandalone:
         """list-risks with filters that yield no results shows message."""
         # Use a combination unlikely to yield results
         result = runner.invoke(
-            list_risks, ["--format", "text", "--category", "Ethics", "--artifact-type", "api_schema"]
+            list_risks,
+            ["--format", "text", "--category", "Ethics", "--artifact-type", "api_schema"],
         )
         assert result.exit_code == 0
         # Either shows "No risks found" or an empty table

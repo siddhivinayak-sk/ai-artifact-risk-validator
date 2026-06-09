@@ -15,9 +15,8 @@ from __future__ import annotations
 
 import importlib
 import sys
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 import yaml
@@ -25,10 +24,8 @@ import yaml
 from ai_artifact_risk_validator.models.config import ValidatorConfig
 from ai_artifact_risk_validator.models.enums import (
     ArtifactType,
-    GateAction,
     ScannerModule,
 )
-
 
 # =============================================================================
 # Tests for pipeline/discovery.py - Permission and OS error paths
@@ -220,7 +217,9 @@ class TestConfigManagerEdgeCases:
 
     def test_schema_validation_errors_logged(self, tmp_path: Path):
         """Config file failing schema validation returns defaults."""
-        from ai_artifact_risk_validator.config.manager import ConfigManager, _validate_against_schema
+        from ai_artifact_risk_validator.config.manager import (
+            ConfigManager,
+        )
 
         # Mock the schema validator to return errors
         cm = ConfigManager()
@@ -229,9 +228,7 @@ class TestConfigManagerEdgeCases:
             return_value=["root: 'threshold' is invalid"],
         ):
             config_file = tmp_path / ".aav.yaml"
-            config_file.write_text(
-                yaml.dump({"severity": {"threshold": 5}}), encoding="utf-8"
-            )
+            config_file.write_text(yaml.dump({"severity": {"threshold": 5}}), encoding="utf-8")
             config = cm.load(scan_path=str(tmp_path))
         # Should fall back to defaults due to validation error
         assert isinstance(config, ValidatorConfig)
@@ -254,10 +251,12 @@ class TestConfigManagerEdgeCases:
         """When jsonschema is not available, validation is skipped."""
         from ai_artifact_risk_validator.config.manager import _validate_against_schema
 
-        with patch.dict(sys.modules, {"jsonschema": None}):
-            with patch("importlib.import_module", side_effect=ImportError):
-                # Force re-import by mocking the import
-                pass
+        with (
+            patch.dict(sys.modules, {"jsonschema": None}),
+            patch("importlib.import_module", side_effect=ImportError),
+        ):
+            # Force re-import by mocking the import
+            pass
         # Direct test with jsonschema available but data valid
         result = _validate_against_schema({"log_level": "INFO"})
         # Returns list of error messages (could be empty for valid input)
@@ -293,9 +292,9 @@ class TestConfigManagerEdgeCases:
 
     def test_env_var_html_report_path(self):
         """AAV_HTML_REPORT_PATH env var is parsed."""
-        from ai_artifact_risk_validator.config.manager import ConfigManager
-
         import os
+
+        from ai_artifact_risk_validator.config.manager import ConfigManager
 
         with patch.dict(os.environ, {"AAV_HTML_REPORT_PATH": "/tmp/report.html"}):
             cm = ConfigManager()
@@ -347,6 +346,7 @@ class TestLoadAllRisksEdgeCases:
         with patch(
             "ai_artifact_risk_validator.risks.definitions.importlib.import_module"
         ) as mock_import:
+
             def side_effect(name):
                 if "prompts" in name:
                     return mock_module
@@ -367,6 +367,7 @@ class TestLoadAllRisksEdgeCases:
         with patch(
             "ai_artifact_risk_validator.risks.definitions.importlib.import_module"
         ) as mock_import:
+
             def side_effect(name):
                 if "prompts" in name:
                     return mock_module
@@ -385,6 +386,7 @@ class TestLoadAllRisksEdgeCases:
         with patch(
             "ai_artifact_risk_validator.risks.definitions.importlib.import_module"
         ) as mock_import:
+
             def side_effect(name):
                 if "prompts" in name:
                     raise ImportError("No module named 'prompts'")
@@ -406,6 +408,7 @@ class TestLoadAllRisksEdgeCases:
         with patch(
             "ai_artifact_risk_validator.risks.definitions.importlib.import_module"
         ) as mock_import:
+
             def side_effect(name):
                 if "prompts" in name:
                     return mock_module
@@ -444,17 +447,18 @@ class TestReportParserMalformedJson:
 
     def test_non_json_bytes_triggers_generic_exception_path(self):
         """Input that triggers the generic Exception path (not ValidationError)."""
-        from ai_artifact_risk_validator.reporting.parser import ReportParser
         from unittest.mock import patch
+
         from ai_artifact_risk_validator.models.report import ScanReport
+        from ai_artifact_risk_validator.reporting.parser import ReportParser
 
         parser = ReportParser()
         # Mock model_validate_json to raise a non-ValidationError exception
-        with patch.object(
-            ScanReport, "model_validate_json", side_effect=RuntimeError("unexpected")
+        with (
+            patch.object(ScanReport, "model_validate_json", side_effect=RuntimeError("unexpected")),
+            pytest.raises(ValueError, match="Malformed JSON"),
         ):
-            with pytest.raises(ValueError, match="Malformed JSON"):
-                parser.parse('{"valid": "json"}')
+            parser.parse('{"valid": "json"}')
 
 
 # =============================================================================
@@ -478,7 +482,10 @@ class TestScannerRegistryEntryPoints:
         with patch("importlib.metadata.entry_points", return_value=[mock_ep]):
             registry.discover_entry_points()
         # Should not have registered anything
-        assert registry.registered_scanners == [] or ScannerModule.SECRET_SCAN not in registry.registered_scanners
+        assert (
+            registry.registered_scanners == []
+            or ScannerModule.SECRET_SCAN not in registry.registered_scanners
+        )
 
     def test_entry_point_load_exception_handled(self):
         """Exception during entry point loading is handled gracefully."""
@@ -492,7 +499,7 @@ class TestScannerRegistryEntryPoints:
 
         with patch("importlib.metadata.entry_points", return_value=[mock_ep]):
             registry.discover_entry_points()
-        assert ScannerModule.SECRET_SCAN not in registry.registered_scanners or True
+        assert True
 
     def test_entry_points_query_exception_handled(self):
         """Exception querying entry points is handled gracefully."""
@@ -506,9 +513,9 @@ class TestScannerRegistryEntryPoints:
 
     def test_get_scanners_availability_check_exception(self):
         """Scanner whose is_available() raises is skipped."""
+        from ai_artifact_risk_validator.models import ScanFinding
         from ai_artifact_risk_validator.scanners.base import BaseScanner
         from ai_artifact_risk_validator.scanners.registry import ScannerRegistry
-        from ai_artifact_risk_validator.models import ScanFinding
 
         class BrokenAvailabilityScanner(BaseScanner):
             @property
@@ -581,9 +588,11 @@ class TestSecretScanOptionalDeps:
         scanner._detect_secrets_loaded = False
         scanner._detect_secrets = None
 
-        with patch.dict(sys.modules, {"detect_secrets": None}):
-            with patch("importlib.import_module", side_effect=ImportError):
-                result = scanner._load_detect_secrets()
+        with (
+            patch.dict(sys.modules, {"detect_secrets": None}),
+            patch("importlib.import_module", side_effect=ImportError),
+        ):
+            result = scanner._load_detect_secrets()
         # Already loaded as None since import failed during first attempt
         # The actual implementation uses try/except ImportError
         assert scanner._detect_secrets is None or result is None

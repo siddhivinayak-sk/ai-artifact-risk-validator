@@ -5,22 +5,16 @@ from __future__ import annotations
 import os
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
-
-import pytest
-import yaml
+from unittest.mock import patch
 
 from ai_artifact_risk_validator.config.manager import (
     ConfigManager,
-    _find_config_file,
+    _config_dict_to_validator_config,
     _flatten_nested_config,
     _get_config_schema,
-    _is_nested_format,
     _parse_env_vars,
     _validate_against_schema,
-    _config_dict_to_validator_config,
 )
-from ai_artifact_risk_validator.models.config import ValidatorConfig
 
 
 class TestGetConfigSchema:
@@ -28,17 +22,18 @@ class TestGetConfigSchema:
 
     def test_schema_import_fallback(self):
         """When config.schema import fails, returns permissive schema."""
-        with patch(
-            "ai_artifact_risk_validator.config.manager._get_config_schema",
-            wraps=_get_config_schema,
-        ):
-            # Call _get_config_schema with the schema module unavailable
-            with patch.dict(
+        with (
+            patch(
+                "ai_artifact_risk_validator.config.manager._get_config_schema",
+                wraps=_get_config_schema,
+            ),
+            patch.dict(
                 sys.modules,
                 {"ai_artifact_risk_validator.config.schema": None},
-            ):
-                # Directly test the fallback by mocking the import inside the function
-                pass
+            ),
+        ):
+            # Directly test the fallback by mocking the import inside the function
+            pass
 
         # Direct test: the function should work when schema IS available
         schema = _get_config_schema()
@@ -54,6 +49,7 @@ class TestValidateAgainstSchema:
         with patch.dict(sys.modules, {"jsonschema": None}):
             # Force import to fail within the function
             import builtins
+
             original_import = builtins.__import__
 
             def mock_import(name, *args, **kwargs):
