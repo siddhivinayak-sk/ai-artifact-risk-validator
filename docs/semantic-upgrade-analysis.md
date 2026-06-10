@@ -11,7 +11,7 @@
 
 | Dimension | Value |
 |---|---|
-| Package | `ai-artifact-risk-validator` v0.4.0 |
+| Package | `ai-artifact-risk-validator` v0.5.0 |
 | Python | 3.11+ |
 | Artifact types | 14 (`ArtifactType` enum in `models/enums.py`) |
 | Scanner modules | 14 (static) + 1 (dynamic MCP) |
@@ -611,7 +611,7 @@ Each task below is designed for a single agent coding session.
 - `tests/test_config_manager.py`
 
 **Acceptance criteria:**
-- `--no-semantic` flag produces identical results to current v0.4.0
+- `--no-semantic` flag produces identical results to current v0.5.0
 - Config file thresholds are respected by all semantic-enabled scanners
 - Missing ML dependencies auto-disables semantic without errors
 
@@ -782,7 +782,7 @@ Each task below is designed for a single agent coding session.
 2. When `sentence-transformers` is not installed:
    - `EmbeddingEngine.is_available` returns `False`
    - All scanners fall back to regex-only mode
-   - Test suite passes identically to v0.4.0
+   - Test suite passes identically to v0.5.0
 3. Semantic features activate automatically when `[ml]` extras are installed
 4. `--no-semantic` CLI flag provides explicit opt-out
 
