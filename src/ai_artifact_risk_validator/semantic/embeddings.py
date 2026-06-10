@@ -8,6 +8,7 @@ raise ``RuntimeError`` and ``is_available`` returns ``False``.
 from __future__ import annotations
 
 import hashlib
+import threading
 from typing import TYPE_CHECKING, Any
 
 from ai_artifact_risk_validator._internal.logging import get_logger
@@ -184,6 +185,7 @@ class EmbeddingEngine:
 
 # --- Module-level singleton ---
 _shared_engine: EmbeddingEngine | None = None
+_engine_lock = threading.Lock()
 
 
 def get_shared_engine() -> EmbeddingEngine:
@@ -191,8 +193,11 @@ def get_shared_engine() -> EmbeddingEngine:
 
     Ensures the model is loaded at most once per process, avoiding
     repeated weight loading when multiple scanners use embeddings.
+    Thread-safe via double-checked locking.
     """
     global _shared_engine
     if _shared_engine is None:
-        _shared_engine = EmbeddingEngine()
+        with _engine_lock:
+            if _shared_engine is None:
+                _shared_engine = EmbeddingEngine()
     return _shared_engine
