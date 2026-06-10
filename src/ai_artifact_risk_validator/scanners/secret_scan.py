@@ -724,9 +724,18 @@ class SecretScanScanner(BaseScanner):
         # Optional: enhanced PII detection with presidio
         presidio = self._load_presidio()
         if presidio is not None:
+            # Entity types that are not actual PII/credential risks in config files
+            _PRESIDIO_SKIP_ENTITIES: set[str] = {
+                "URL",           # URLs are expected in MCP/API configs
+                "DATE_TIME",     # Timestamps are not PII
+                "NRP",           # Nationality/religious/political group — too noisy
+                "LOCATION",      # Location names are not credential leaks
+            }
             try:
                 results = presidio.analyze(text=content, language="en")
                 for result in results:
+                    if result.entity_type in _PRESIDIO_SKIP_ENTITIES:
+                        continue
                     # Find line number for the match
                     offset = result.start
                     line_num = content[:offset].count("\n") + 1
