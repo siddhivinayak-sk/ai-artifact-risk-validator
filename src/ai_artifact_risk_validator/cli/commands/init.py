@@ -79,6 +79,13 @@ custom_patterns: {}
 #     - "./custom-scanners/"
 plugins:
   directories: []
+
+# Semantic (embedding-based) analysis
+# Requires: pip install ai-artifact-risk-validator[ml]
+semantic:
+  enabled: true                   # Set to false to disable semantic analysis
+  model_name: "all-MiniLM-L6-v2" # Sentence-transformer model
+  threshold: 0.55                 # Similarity threshold for semantic matches (0.0-1.0)
 """
 
 

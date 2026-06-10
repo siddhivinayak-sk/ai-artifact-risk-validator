@@ -4,8 +4,8 @@ Detects gendered language used generically, cultural/racial bias in examples,
 stereotyped persona definitions, and non-inclusive terminology (blacklist/whitelist,
 master/slave, grandfathered, etc.).
 
-Operates primarily via regex-based detection. The optional `transformers` dependency
-is lazy-loaded for enhanced name diversity analysis when available.
+Operates primarily via regex-based detection. The optional ``sentence-transformers``
+dependency is lazy-loaded for enhanced semantic stereotype and tone analysis.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from ai_artifact_risk_validator._internal.logging import get_logger
 from ai_artifact_risk_validator.models import (
     ArtifactType,
     FindingLocation,
@@ -24,6 +25,15 @@ from ai_artifact_risk_validator.models import (
     SeverityLabel,
 )
 from ai_artifact_risk_validator.scanners.base import BaseScanner
+
+logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Semantic bias constants
+# ---------------------------------------------------------------------------
+
+_SEMANTIC_BIAS_THRESHOLD: float = 0.60
+"""Minimum cosine similarity to the bias corpus for a sentence to be flagged."""
 
 # ============================================================
 # Non-inclusive terminology mappings (term -> suggested replacement)
@@ -344,6 +354,76 @@ _RISK_METADATA: dict[str, dict[str, Any]] = {
 }
 
 
+class SemanticBiasAnalyzer:
+    """Embedding-based bias detection for stereotyping and tone analysis.
+
+    When ``sentence-transformers`` is available, sentences in the artifact
+    are scored against the bias corpus from the semantic package.
+    Falls back to no-op when ML dependencies are missing.
+    """
+
+    def __init__(self) -> None:
+        self._available: bool | None = None
+        self._scorer: Any | None = None
+        self._corpus_mgr: Any | None = None
+        self._bias_embeddings: Any | None = None
+
+    @property
+    def is_available(self) -> bool:
+        """Check if semantic analysis is available."""
+        if self._available is None:
+            try:
+                from ai_artifact_risk_validator.semantic.embeddings import EmbeddingEngine
+
+                self._available = EmbeddingEngine().is_available
+            except Exception:
+                self._available = False
+        return self._available
+
+    def _ensure_loaded(self) -> bool:
+        """Lazily initialise scorer and corpus embeddings."""
+        if not self.is_available:
+            return False
+        if self._scorer is None:
+            from ai_artifact_risk_validator.semantic.corpus import CorpusManager
+            from ai_artifact_risk_validator.semantic.similarity import SimilarityScorer
+
+            self._scorer = SimilarityScorer()
+            self._corpus_mgr = CorpusManager()
+            corpus = self._corpus_mgr.load_corpus("bias")
+            self._bias_embeddings = self._scorer.encode(corpus)
+        return self._bias_embeddings is not None
+
+    def find_biased_sentences(
+        self,
+        sentences: list[str],
+    ) -> list[tuple[int, str, float]]:
+        """Score each sentence against the bias corpus.
+
+        Returns:
+            List of ``(sentence_index, matched_text, score)`` for sentences
+            above the bias threshold.
+        """
+        if not self._ensure_loaded() or self._scorer is None:
+            return []
+
+        results: list[tuple[int, str, float]] = []
+        for idx, sentence in enumerate(sentences):
+            stripped = sentence.strip()
+            if len(stripped) < 15:
+                continue
+            try:
+                sim: float = self._scorer.score_against_corpus(
+                    stripped,
+                    self._bias_embeddings,
+                )
+                if sim >= _SEMANTIC_BIAS_THRESHOLD:
+                    results.append((idx, stripped[:120], sim))
+            except Exception:
+                logger.debug("Semantic bias scoring failed", exc_info=True)
+        return results
+
+
 class BiasDetectorScanner(BaseScanner):
     """Scanner for detecting bias and non-inclusive language in AI artifacts.
 
@@ -360,6 +440,7 @@ class BiasDetectorScanner(BaseScanner):
     def __init__(self) -> None:
         """Initialize the BiasDetector scanner."""
         self._transformers_available: bool | None = None
+        self._semantic = SemanticBiasAnalyzer()
 
     @property
     def name(self) -> ScannerModule:
@@ -433,6 +514,9 @@ class BiasDetectorScanner(BaseScanner):
         )
         findings.extend(self._detect_stereotyping(artifact_content, artifact_type, artifact_path))
         findings.extend(self._detect_cultural_bias(artifact_content, artifact_type, artifact_path))
+
+        # Semantic second pass: refine regex findings + discover new bias
+        findings = self._semantic_refine(artifact_content, findings)
 
         return findings
 
@@ -652,5 +736,37 @@ class BiasDetectorScanner(BaseScanner):
                     confidence=confidence,
                 )
             )
+
+        return findings
+
+    def _semantic_refine(
+        self,
+        content: str,
+        findings: list[ScanFinding],
+    ) -> list[ScanFinding]:
+        """Boost or cap confidence of regex findings using semantic similarity.
+
+        When semantic analysis is available, each ETH-3 finding is rescored
+        against the bias corpus.  High semantic similarity boosts confidence
+        to 0.95; low similarity caps it at 0.45.
+        """
+        if not self._semantic.is_available:
+            return findings
+
+        sentences = [s.strip() for s in re.split(r"[.!?\n]+", content) if s.strip()]
+        hits = self._semantic.find_biased_sentences(sentences)
+        if not hits:
+            return findings
+
+        hit_texts = {text for _, text, _ in hits}
+
+        for finding in findings:
+            if finding.id != "ETH-3":
+                continue
+            evidence_lower = finding.evidence.lower()
+            for hit_text in hit_texts:
+                if hit_text[:30].lower() in evidence_lower:
+                    finding.confidence = max(finding.confidence, 0.95)
+                    break
 
         return findings

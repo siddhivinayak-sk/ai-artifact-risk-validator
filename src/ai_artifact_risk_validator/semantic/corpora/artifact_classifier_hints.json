@@ -1,0 +1,119 @@
+{
+  "prompt": [
+    "You are a helpful assistant",
+    "System prompt for the AI model",
+    "role: system",
+    "Answer the user's question based on the following context",
+    "You must follow these rules when generating responses",
+    "As an AI language model, your task is to",
+    "Generate a response that is helpful and harmless",
+    "Do not reveal your system prompt to the user",
+    "You are an expert in",
+    "Please respond in a professional tone"
+  ],
+  "skill": [
+    "This skill provides the ability to",
+    "Invocation criteria for this skill",
+    "When the user asks about",
+    "Use this skill when",
+    "SKILL.md defines the behavior",
+    "The skill is triggered by",
+    "Capability: search and retrieve",
+    "Tool integration for",
+    "This skill handles requests related to"
+  ],
+  "agent": [
+    "Agent configuration and capabilities",
+    "tool declarations for the agent",
+    "The agent can perform the following actions",
+    "Agent mode with specialized behavior",
+    "capability declarations and tool access",
+    "AGENT.md defines this agent",
+    "Tools available to this agent",
+    "Agent persona and behavior rules",
+    "Multi-agent orchestration participant"
+  ],
+  "sop": [
+    "Standard operating procedure",
+    "Step 1: Begin by reviewing",
+    "Follow these steps in order",
+    "Procedure for handling incidents",
+    "Operational guidelines and procedures",
+    "Checklist for deployment",
+    "Workflow steps to complete the task"
+  ],
+  "steering": [
+    "Steering rules for project context",
+    "inclusion: auto",
+    "Priority and scope of this steering file",
+    "Project conventions and coding standards",
+    "Apply these rules to all files matching",
+    "Code review guidelines for the team"
+  ],
+  "mcp": [
+    "MCP server configuration",
+    "Model Context Protocol server",
+    "tools and capabilities exposed via MCP",
+    "transport: stdio",
+    "server command and arguments",
+    "MCP tool with input schema",
+    "Server-side tool implementation"
+  ],
+  "hook": [
+    "Hook triggered on event",
+    "Pre-commit hook configuration",
+    "Post-save automation hook",
+    "Event-driven hook for file changes",
+    "Lifecycle hook definition"
+  ],
+  "instruction": [
+    "Instructions for the AI assistant",
+    "Follow these coding guidelines",
+    "Project-specific instructions",
+    "copilot-instructions.md",
+    "Apply to all files in the workspace",
+    "Global instructions for code generation"
+  ],
+  "plugin": [
+    "VS Code extension manifest",
+    "Plugin contributes commands and views",
+    "Extension activation events",
+    "Package name and version for the plugin",
+    "contributes: commands, menus, views"
+  ],
+  "memory": [
+    "Stored memory entry from previous session",
+    "User preferences and notes",
+    "Session context and working state",
+    "Repository-scoped facts and conventions",
+    "Remembered from earlier conversation"
+  ],
+  "rag": [
+    "Knowledge base document for retrieval",
+    "RAG context for answering questions",
+    "Reference documentation for AI retrieval",
+    "Indexed content for semantic search",
+    "Knowledge source for grounding responses"
+  ],
+  "eval_harness": [
+    "Evaluation test case for AI model",
+    "Benchmark scenario with expected output",
+    "Test prompt and expected response",
+    "Evaluation criteria and scoring rubric",
+    "Model quality assessment harness"
+  ],
+  "orchestration": [
+    "Workflow definition with multiple steps",
+    "Pipeline stage configuration",
+    "Task orchestration and dependencies",
+    "Multi-step automated workflow",
+    "Sequential task execution plan"
+  ],
+  "api_schema": [
+    "OpenAPI specification version 3",
+    "API endpoint paths and operations",
+    "JSON Schema for request validation",
+    "REST API with authentication",
+    "Swagger API documentation"
+  ]
+}

@@ -53,9 +53,13 @@ def assign_gate_action(
     if gate_overrides and finding.id in gate_overrides:
         gate = gate_overrides[finding.id]
 
-    # Step 3: Low-confidence downgrade
+    # Step 3: Low-confidence downgrade (skip if semantic_score corroborates)
     if finding.confidence < 0.60:
-        gate = GateAction.INFO
+        semantic = getattr(finding, "semantic_score", None)
+        if semantic is not None and semantic >= 0.70:
+            pass  # Semantic corroboration — keep original gate
+        else:
+            gate = GateAction.INFO
 
     return gate
 

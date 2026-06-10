@@ -38,10 +38,30 @@ class Aggregator:
         Returns:
             Deduplicated list of findings with suppression rules applied.
         """
-        deduplicated = self._deduplicate(findings)
+        calibrated = self._calibrate_confidence(findings)
+        deduplicated = self._deduplicate(calibrated)
         if suppression_rules:
             deduplicated = self._apply_suppressions(deduplicated, suppression_rules)
         return deduplicated
+
+    @staticmethod
+    def _calibrate_confidence(findings: list[ScanFinding]) -> list[ScanFinding]:
+        """Adjust confidence using semantic_score when present.
+
+        Findings with a high ``semantic_score`` get a confidence boost
+        (capped at 1.0).  Findings with a low ``semantic_score`` get a
+        confidence penalty.  Findings without a ``semantic_score`` pass
+        through unchanged.
+        """
+        result: list[ScanFinding] = []
+        for f in findings:
+            if f.semantic_score is None:
+                result.append(f)
+                continue
+            # Blend original confidence with semantic_score (70/30 weight)
+            blended = 0.7 * f.confidence + 0.3 * f.semantic_score
+            result.append(f.model_copy(update={"confidence": min(blended, 1.0)}))
+        return result
 
     def _deduplicate(self, findings: list[ScanFinding]) -> list[ScanFinding]:
         """Remove duplicate findings, keeping the one with highest confidence.

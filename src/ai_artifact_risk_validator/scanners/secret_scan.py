@@ -346,6 +346,43 @@ _ENTROPY_THRESHOLD = 4.5
 # Minimum length for entropy analysis
 _ENTROPY_MIN_LENGTH = 16
 
+# --- Context-aware false-positive filters ---
+# Patterns that look like high-entropy secrets but are benign.
+
+# UUIDs (v4 with or without dashes)
+_UUID_PATTERN = re.compile(
+    r"^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$"
+)
+
+# Base64-encoded data URIs (images, fonts, etc.)
+_DATA_URI_PATTERN = re.compile(r"^data:[a-zA-Z]+/[a-zA-Z0-9.+-]+;base64,")
+
+# Lockfile / integrity hashes (sha256-xxx, sha384-xxx, sha512-xxx)
+_INTEGRITY_HASH_PATTERN = re.compile(r"^sha(?:256|384|512)-[A-Za-z0-9+/=]+$")
+
+# Well-known placeholder values
+_PLACEHOLDER_PATTERNS = re.compile(
+    r"(?i)(?:REPLACE_ME|CHANGE_ME|TODO|FIXME|YOUR_.*_HERE|EXAMPLE|"
+    r"user@example\.com|test@test\.com|xxx+|000+|placeholder)"
+)
+
+
+def _is_entropy_false_positive(candidate: str, line: str) -> bool:
+    """Return True if the high-entropy *candidate* is a likely false positive.
+
+    Checks common non-secret patterns that trigger high-entropy detection:
+    UUIDs, data-URIs, integrity hashes, and placeholder values.
+    """
+    if _UUID_PATTERN.match(candidate):
+        return True
+    if _DATA_URI_PATTERN.search(line):
+        return True
+    if _INTEGRITY_HASH_PATTERN.match(candidate):
+        return True
+    if _PLACEHOLDER_PATTERNS.search(candidate):
+        return True
+    return False
+
 
 def _calculate_shannon_entropy(data: str) -> float:
     """Calculate Shannon entropy of a string.
@@ -399,6 +436,8 @@ def _find_high_entropy_strings(text: str) -> list[tuple[str, float, int]]:
             if candidate:
                 entropy = _calculate_shannon_entropy(candidate)
                 if entropy > _ENTROPY_THRESHOLD:
+                    if _is_entropy_false_positive(candidate, line):
+                        continue
                     results.append((candidate, entropy, line_num))
 
     return results

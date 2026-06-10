@@ -22,4 +22,9 @@ DEFAULT_CONFIG: dict[str, object] = {
     "suppression_rules": [],
     "gate_overrides": {},
     "custom_artifact_patterns": {},
+    "semantic": {
+        "enabled": True,
+        "model_name": "all-MiniLM-L6-v2",
+        "threshold": 0.55,
+    },
 }

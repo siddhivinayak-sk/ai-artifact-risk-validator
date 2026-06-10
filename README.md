@@ -34,6 +34,7 @@ Key features:
 - **Plugin architecture** — extend with custom scanners via entry points or plugin directories
 - **Parallel execution** — concurrent file and scanner processing for fast scans
 - **Configurable gates** — BLOCK/WARN/INFO decisions with confidence-based downgrade
+- **Semantic analysis** — Optional embedding-based detection using sentence-transformers for paraphrased attack detection, compliance gap analysis, and false positive reduction
 - **Multiple output formats** — JSON, rich terminal text, and HTML reports
 - **CI/CD integration** — exit codes map to gate decisions (0=PASS, 1=BLOCK, 2=WARN)
 - **False positive management** — inline suppression comments and config-based rules
@@ -184,6 +185,17 @@ ai-artifact-validator verify ./mcp.json --allow-dynamic-scan
 # Dynamic scan with verbose logging
 ai-artifact-validator verify ./mcp.json --allow-dynamic-scan --log-level debug
 
+# --- Semantic analysis flags ---
+
+# Disable semantic (embedding-based) analysis
+ai-artifact-validator verify ./my-artifacts --no-semantic
+
+# Use a custom embedding model
+ai-artifact-validator verify ./my-artifacts --semantic-model paraphrase-MiniLM-L6-v2
+
+# Adjust the similarity threshold (0.0-1.0)
+ai-artifact-validator verify ./my-artifacts --semantic-threshold 0.65
+
 # --- list-risks command ---
 
 # List all known risk definitions
@@ -277,6 +289,7 @@ ai-artifact-validator init --force
       "remediation": "Remove or sanitize injection patterns. Use structured prompt templates with clear boundaries.",
       "references": ["OWASP-LLM01"],
       "false_positive": false,
+      "semantic_score": null,
       "timestamp": "2025-06-05T14:32:15.100000Z"
     },
     {
@@ -302,6 +315,7 @@ ai-artifact-validator init --force
       "remediation": "Reduce prompt length or split into multiple sections. Consider using prompt compression techniques.",
       "references": [],
       "false_positive": false,
+      "semantic_score": null,
       "timestamp": "2025-06-05T14:32:15.110000Z"
     },
     {
@@ -327,6 +341,7 @@ ai-artifact-validator init --force
       "remediation": "Add version, author, and tags metadata to the skill definition frontmatter.",
       "references": [],
       "false_positive": false,
+      "semantic_score": null,
       "timestamp": "2025-06-05T14:32:15.120000Z"
     }
   ],
@@ -424,7 +439,12 @@ custom_artifact_patterns:
     - "prompt-templates/**"
   agent:
     - "my-agents/**/*.yaml"
-
+# Semantic (embedding-based) analysis
+# Requires: pip install ai-artifact-risk-validator[ml]
+semantic:
+  enabled: true                   # Set to false to disable semantic analysis
+  model_name: "all-MiniLM-L6-v2" # Sentence-transformer model
+  threshold: 0.55                 # Similarity threshold (0.0-1.0)
 # Custom plugin directories
 custom_plugin_dirs:
   - ./custom-scanners
@@ -450,8 +470,10 @@ Configuration is merged with the following precedence (highest to lowest):
 | `AAV_SEVERITY_THRESHOLD` | Minimum severity to report | `5` |
 | `AAV_PARALLEL_FILES` | Parallel file workers | `8` |
 | `AAV_CACHE_DIR` | Cache directory path | `.aav-cache` |
-| `AAV_HTML_REPORT_PATH` | Write an HTML report to this path as a side effect (in addition to primary output) | `/tmp/report.html` |
-
+| `AAV_HTML_REPORT_PATH` | Write an HTML report to this path as a side effect (in addition to primary output) | `/tmp/report.html` || `AAV_SEMANTIC_ENABLED` | Enable/disable semantic analysis | `true` / `false` |
+| `AAV_SEMANTIC_MODEL` | Sentence-transformer model name | `all-MiniLM-L6-v2` |
+| `AAV_SEMANTIC_THRESHOLD` | Similarity threshold for semantic matches | `0.55` |
+| `AI_VALIDATOR_SEMANTIC_ENABLED` | Alternative env var for semantic toggle | `1` / `true` / `yes` |
 ### Inline suppression
 
 Suppress specific findings in artifact files using comments:
@@ -538,6 +560,35 @@ from ai_artifact_risk_validator.models import ValidatorConfig
 | `custom_artifact_patterns` | `dict[str, list[str]]` | `{}` | Custom classification patterns |
 | `custom_plugin_dirs` | `list[str]` | `[]` | Directories for custom scanners |
 | `html_report_path` | `str \| None` | `None` | Path to write an HTML report as a side effect |
+| `allow_dynamic_scan` | `bool` | `False` | Enable live MCP server scanning |
+| `semantic` | `SemanticConfig` | *(see below)* | Semantic analysis configuration |
+
+### `SemanticConfig` model
+
+```python
+from ai_artifact_risk_validator.models import SemanticConfig
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `enabled` | `bool` | `True` | Enable/disable embedding-based analysis |
+| `model_name` | `str` | `"all-MiniLM-L6-v2"` | Sentence-transformer model name |
+| `threshold` | `float` (0.0-1.0) | `0.55` | Minimum similarity for semantic matches |
+
+```python
+# Example: disable semantic analysis
+config = ValidatorConfig(
+    semantic=SemanticConfig(enabled=False),
+)
+
+# Example: custom model and threshold
+config = ValidatorConfig(
+    semantic=SemanticConfig(
+        model_name="paraphrase-MiniLM-L6-v2",
+        threshold=0.65,
+    ),
+)
+```
 
 ### `ScanReport` model
 
@@ -581,6 +632,7 @@ from ai_artifact_risk_validator.models import ScanFinding
 | `remediation` | `str` | How to fix |
 | `references` | `list[str]` | OWASP, CWE references |
 | `false_positive` | `bool` | Whether suppressed |
+| `semantic_score` | `float \| None` | Semantic similarity score (if available) |
 | `timestamp` | `datetime` | Detection timestamp |
 
 ### `ScanSummary` model

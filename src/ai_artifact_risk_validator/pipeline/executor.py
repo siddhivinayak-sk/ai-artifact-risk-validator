@@ -18,6 +18,7 @@ from ai_artifact_risk_validator._internal.logging import get_logger
 from ai_artifact_risk_validator.classifiers import ArtifactClassifier
 from ai_artifact_risk_validator.models import ScanFinding, ValidatorConfig
 from ai_artifact_risk_validator.models.enums import ArtifactType
+from ai_artifact_risk_validator.pipeline.cross_file_analyzer import CrossFileAnalyzer
 from ai_artifact_risk_validator.scanners.base import BaseScanner
 from ai_artifact_risk_validator.scanners.registry import ScannerRegistry
 
@@ -43,6 +44,10 @@ class PipelineExecutor:
         self._config = config or ValidatorConfig()
         self._parallel_files: int = self._config.parallel_files
         self._parallel_scanners: int = self._config.parallel_scanners
+        self._cross_file_analyzer = CrossFileAnalyzer()
+        # Populated during execute() for cross-file analysis.
+        self._file_contents: dict[Path, str] = {}
+        self._file_types: dict[Path, ArtifactType] = {}
 
     def execute(
         self,
@@ -70,6 +75,8 @@ class PipelineExecutor:
             return []
 
         all_findings: list[ScanFinding] = []
+        self._file_contents = {}
+        self._file_types = {}
 
         with ThreadPoolExecutor(max_workers=self._parallel_files) as file_executor:
             future_to_file = {
@@ -90,6 +97,17 @@ class PipelineExecutor:
                         artifact_path=str(file_path),
                         error=str(exc),
                     )
+
+        # Post-scan: cross-file semantic analysis
+        if self._file_contents and self._cross_file_analyzer.is_available:
+            try:
+                cross_findings = self._cross_file_analyzer.analyze(
+                    self._file_contents,
+                    self._file_types,
+                )
+                all_findings.extend(cross_findings)
+            except Exception as exc:
+                logger.debug("Cross-file analysis failed", error=str(exc))
 
         return all_findings
 
@@ -124,6 +142,10 @@ class PipelineExecutor:
             return []
 
         artifact_type = classification.artifact_type
+
+        # Store for cross-file analysis
+        self._file_contents[file_path] = content
+        self._file_types[file_path] = artifact_type
 
         # Step 3: Get applicable scanners
         scanners = scanner_registry.get_scanners_for_artifact(artifact_type)

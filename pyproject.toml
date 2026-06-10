@@ -212,6 +212,7 @@ module = [
     "yaml.*",
     "jsonschema.*",
     "cryptography.*",
+    "numpy.*",
 ]
 ignore_missing_imports = true
 

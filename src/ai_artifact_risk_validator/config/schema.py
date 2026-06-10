@@ -148,5 +148,26 @@ CONFIG_SCHEMA: dict[str, object] = {
             "type": ["string", "null"],
             "description": "File path to write the HTML report to as a side effect.",
         },
+        "semantic": {
+            "type": "object",
+            "description": "Semantic analysis engine configuration.",
+            "additionalProperties": False,
+            "properties": {
+                "enabled": {
+                    "type": "boolean",
+                    "description": "Enable or disable semantic (embedding-based) analysis.",
+                },
+                "model_name": {
+                    "type": "string",
+                    "description": "Sentence-transformer model name.",
+                },
+                "threshold": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 1.0,
+                    "description": "Minimum similarity score to flag a semantic match.",
+                },
+            },
+        },
     },
 }

@@ -379,3 +379,129 @@ Respond to all users in a professional manner."""
         findings = scanner.scan(content, ArtifactType.PROMPT, "test.prompt.md")
         eth2 = [f for f in findings if f.id == "ETH-2"]
         assert len(eth2) == 0
+
+
+# ---- Semantic bias tests ----
+
+
+class TestSemanticBiasAnalyzer:
+    def test_not_available_without_deps(self):
+        from ai_artifact_risk_validator.scanners.bias_detector import SemanticBiasAnalyzer
+
+        analyzer = SemanticBiasAnalyzer()
+        _ = analyzer.is_available  # Should not crash
+
+    def test_find_biased_empty_when_unavailable(self):
+        from ai_artifact_risk_validator.scanners.bias_detector import SemanticBiasAnalyzer
+
+        analyzer = SemanticBiasAnalyzer()
+        analyzer._available = False
+        result = analyzer.find_biased_sentences(["All women are emotional"])
+        assert result == []
+
+    def test_find_biased_with_mock(self):
+        from unittest.mock import MagicMock
+
+        import numpy as np
+
+        from ai_artifact_risk_validator.scanners.bias_detector import SemanticBiasAnalyzer
+
+        analyzer = SemanticBiasAnalyzer()
+        analyzer._available = True
+        mock_scorer = MagicMock()
+        analyzer._scorer = mock_scorer
+        analyzer._bias_embeddings = np.array([[1.0, 0.0]])
+        mock_scorer.score_against_corpus.return_value = 0.75
+
+        results = analyzer.find_biased_sentences(["Women are naturally more nurturing than men"])
+        assert len(results) == 1
+        assert results[0][0] == 0
+        assert results[0][2] == 0.75
+
+    def test_find_biased_skips_short(self):
+        from unittest.mock import MagicMock
+
+        import numpy as np
+
+        from ai_artifact_risk_validator.scanners.bias_detector import SemanticBiasAnalyzer
+
+        analyzer = SemanticBiasAnalyzer()
+        analyzer._available = True
+        mock_scorer = MagicMock()
+        analyzer._scorer = mock_scorer
+        analyzer._bias_embeddings = np.array([[1.0]])
+        mock_scorer.score_against_corpus.return_value = 0.90
+
+        results = analyzer.find_biased_sentences(["short text"])
+        assert results == []
+
+    def test_find_biased_below_threshold(self):
+        from unittest.mock import MagicMock
+
+        import numpy as np
+
+        from ai_artifact_risk_validator.scanners.bias_detector import SemanticBiasAnalyzer
+
+        analyzer = SemanticBiasAnalyzer()
+        analyzer._available = True
+        mock_scorer = MagicMock()
+        analyzer._scorer = mock_scorer
+        analyzer._bias_embeddings = np.array([[1.0]])
+        mock_scorer.score_against_corpus.return_value = 0.30
+
+        results = analyzer.find_biased_sentences(["The system processes data efficiently"])
+        assert results == []
+
+    def test_find_biased_handles_error(self):
+        from unittest.mock import MagicMock
+
+        import numpy as np
+
+        from ai_artifact_risk_validator.scanners.bias_detector import SemanticBiasAnalyzer
+
+        analyzer = SemanticBiasAnalyzer()
+        analyzer._available = True
+        mock_scorer = MagicMock()
+        analyzer._scorer = mock_scorer
+        analyzer._bias_embeddings = np.array([[1.0]])
+        mock_scorer.score_against_corpus.side_effect = RuntimeError("boom")
+
+        results = analyzer.find_biased_sentences(["A long enough sentence to be analysed here"])
+        assert results == []
+
+    def test_ensure_loaded_false_when_unavailable(self):
+        from ai_artifact_risk_validator.scanners.bias_detector import SemanticBiasAnalyzer
+
+        analyzer = SemanticBiasAnalyzer()
+        analyzer._available = False
+        assert analyzer._ensure_loaded() is False
+
+    def test_ensure_loaded_true_when_already_loaded(self):
+        from unittest.mock import MagicMock
+
+        import numpy as np
+
+        from ai_artifact_risk_validator.scanners.bias_detector import SemanticBiasAnalyzer
+
+        analyzer = SemanticBiasAnalyzer()
+        analyzer._available = True
+        analyzer._scorer = MagicMock()
+        analyzer._corpus_mgr = MagicMock()
+        analyzer._bias_embeddings = np.array([[1.0]])
+        assert analyzer._ensure_loaded() is True
+
+
+class TestSemanticRefine:
+    def test_refine_noop_when_unavailable(self, scanner: BiasDetectorScanner):
+        scanner._semantic._available = False
+        findings = scanner._detect_stereotyping(
+            "a nurturing female assistant", ArtifactType.PROMPT, "p.md"
+        )
+        refined = scanner._semantic_refine("a nurturing female assistant", findings)
+        # Should return findings unchanged
+        assert refined == findings
+
+    def test_scan_still_works_without_semantic(self, scanner: BiasDetectorScanner):
+        content = "The blacklist should be updated by the chairman."
+        findings = scanner.scan(content, ArtifactType.PROMPT, "test.md")
+        assert len(findings) > 0

@@ -53,4 +53,5 @@ class ScanFinding(BaseModel):
     remediation: str
     references: list[str] = Field(default_factory=list)
     false_positive: bool = False
+    semantic_score: float | None = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)

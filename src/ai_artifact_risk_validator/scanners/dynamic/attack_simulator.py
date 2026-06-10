@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from ai_artifact_risk_validator.models.enums import (
     ArtifactType,
@@ -28,6 +28,9 @@ from ai_artifact_risk_validator.models.enums import (
 )
 from ai_artifact_risk_validator.models.findings import FindingLocation, ScanFinding
 from ai_artifact_risk_validator.models.mcp_models import MCPToolInfo
+
+if TYPE_CHECKING:
+    from ai_artifact_risk_validator.semantic.similarity import SimilarityScorer
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +111,76 @@ def _is_file_accepting_param(param_name: str, param_def: dict[str, Any]) -> bool
     return False
 
 
+# ============================================================
+# Semantic file-parameter detection
+# ============================================================
+
+_FILE_PARAM_CORPUS: list[str] = [
+    "The path to the file to read.",
+    "Location of the resource on disk.",
+    "Filename or directory path.",
+    "A filesystem path to the target.",
+    "The document to open.",
+    "Source file for processing.",
+]
+
+_SEMANTIC_FILE_PARAM_THRESHOLD: float = 0.50
+
+
+class SemanticParamDetector:
+    """Detect file-accepting parameters via embedding similarity.
+
+    Falls back to no-op when ``sentence-transformers`` is absent.
+    """
+
+    def __init__(self) -> None:
+        self._scorer: SimilarityScorer | None = None
+        self._corpus_embs: Any = None
+        self._available: bool | None = None
+
+    @property
+    def is_available(self) -> bool:
+        if self._available is None:
+            try:
+                from ai_artifact_risk_validator.semantic.embeddings import (
+                    EmbeddingEngine,
+                )
+
+                self._available = EmbeddingEngine().is_available
+            except Exception:
+                self._available = False
+        return self._available
+
+    def _ensure_loaded(self) -> bool:
+        if self._scorer is not None:
+            return True
+        if not self.is_available:
+            return False
+        try:
+            from ai_artifact_risk_validator.semantic.similarity import (
+                SimilarityScorer,
+            )
+
+            self._scorer = SimilarityScorer()
+            self._corpus_embs = self._scorer.encode(_FILE_PARAM_CORPUS)
+            return True
+        except Exception:
+            self._available = False
+            return False
+
+    def is_file_param(self, param_name: str, param_desc: str) -> bool:
+        """Return ``True`` if the parameter description is semantically
+        similar to file/path references."""
+        text = f"{param_name} {param_desc}".strip()
+        if not text or not self._ensure_loaded() or self._scorer is None:
+            return False
+        try:
+            score: float = self._scorer.score_against_corpus(text, self._corpus_embs)
+            return score >= _SEMANTIC_FILE_PARAM_THRESHOLD
+        except Exception:
+            return False
+
+
 def _response_indicates_traversal(response: dict[str, Any]) -> bool:
     """Check if a server response indicates successful path traversal.
 
@@ -159,6 +232,7 @@ class AttackSimulator:
     def __init__(self) -> None:
         """Initialize AttackSimulator with default payloads."""
         self._payloads = PATH_TRAVERSAL_PAYLOADS
+        self._semantic = SemanticParamDetector()
 
     def _identify_file_params(self, tool: MCPToolInfo) -> list[str]:
         """Identify file-accepting parameters in a tool's input schema.
@@ -184,6 +258,10 @@ class AttackSimulator:
                 continue
             if _is_file_accepting_param(param_name, param_def):
                 file_params.append(param_name)
+            elif self._semantic.is_available:
+                param_desc = param_def.get("description", "")
+                if self._semantic.is_file_param(param_name, param_desc):
+                    file_params.append(param_name)
 
         return file_params
 
