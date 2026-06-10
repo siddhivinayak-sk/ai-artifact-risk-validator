@@ -8,6 +8,7 @@ for enhanced verification.
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timezone
 from typing import Any
@@ -828,6 +829,11 @@ class ProvenanceChkScanner(BaseScanner):
         checking, source attribution analysis, staleness detection, and
         optional git history analysis.
 
+        MCP client configuration files (containing ``mcpServers`` or
+        ``servers`` keys that reference remote URLs) are exempt from
+        provenance, integrity, and signature checks because those checks
+        apply to server *artifacts*, not to client connection configs.
+
         Args:
             artifact_content: The full text content of the artifact.
             artifact_type: Classified type of the artifact.
@@ -838,16 +844,25 @@ class ProvenanceChkScanner(BaseScanner):
         """
         findings: list[ScanFinding] = []
 
-        # 1. Check provenance metadata (author, version, timestamp, source)
-        findings.extend(
-            self._check_provenance_metadata(artifact_content, artifact_type, artifact_path)
+        # Skip provenance/integrity/signature checks for MCP client config files.
+        # These are connection configs (url, command, args) — not server packages.
+        is_mcp_client_config = (
+            artifact_type == ArtifactType.MCP and self._is_mcp_client_config(artifact_content)
         )
 
-        # 2. Check integrity hash/checksum
-        findings.extend(self._check_integrity_hash(artifact_content, artifact_type, artifact_path))
+        if not is_mcp_client_config:
+            # 1. Check provenance metadata (author, version, timestamp, source)
+            findings.extend(
+                self._check_provenance_metadata(artifact_content, artifact_type, artifact_path)
+            )
 
-        # 3. Check cryptographic signature
-        findings.extend(self._check_signature(artifact_content, artifact_type, artifact_path))
+            # 2. Check integrity hash/checksum
+            findings.extend(
+                self._check_integrity_hash(artifact_content, artifact_type, artifact_path)
+            )
+
+            # 3. Check cryptographic signature
+            findings.extend(self._check_signature(artifact_content, artifact_type, artifact_path))
 
         # 4. Check source attribution
         findings.extend(
@@ -866,3 +881,38 @@ class ProvenanceChkScanner(BaseScanner):
         findings.extend(self._check_git_provenance(artifact_path, artifact_type))
 
         return findings
+
+    @staticmethod
+    def _is_mcp_client_config(content: str) -> bool:
+        """Detect whether content is an MCP client configuration file.
+
+        MCP client configs contain ``mcpServers`` (Claude Desktop format) or
+        ``servers`` (VS Code format) with server entries that have ``url`` or
+        ``command`` fields — indicating they are *connection* definitions, not
+        server artifacts that need provenance/integrity verification.
+
+        Args:
+            content: The artifact text content.
+
+        Returns:
+            True if the content looks like an MCP client config file.
+        """
+        try:
+            data = json.loads(content)
+        except (json.JSONDecodeError, ValueError):
+            return False
+
+        if not isinstance(data, dict):
+            return False
+
+        # Claude Desktop uses "mcpServers", VS Code uses "servers"
+        servers = data.get("mcpServers") or data.get("servers")
+        if not isinstance(servers, dict):
+            return False
+
+        # Check that at least one server entry has a "url" or "command" field
+        for entry in servers.values():
+            if isinstance(entry, dict) and ("url" in entry or "command" in entry):
+                return True
+
+        return False
