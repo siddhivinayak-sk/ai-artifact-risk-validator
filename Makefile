@@ -8,8 +8,26 @@ help: ## Show this help message
 install: ## Install the package with core dependencies
 	pip install -e .
 
+install-ml: ## Install with ML/semantic features (CPU-only torch, ~200 MB)
+	pip install torch --index-url https://download.pytorch.org/whl/cpu
+	pip install -e ".[ml]"
+
+install-ml-gpu: ## Install with ML/semantic features (GPU torch, ~2.5 GB)
+	pip install -e ".[ml]"
+
+install-all: ## Install all optional dependencies (CPU-only torch)
+	pip install torch --index-url https://download.pytorch.org/whl/cpu
+	pip install -e ".[all]"
+
+install-all-gpu: ## Install all optional dependencies (GPU torch)
+	pip install -e ".[all]"
+
 dev-install: ## Install the package with all development dependencies
 	pip install -e ".[dev,test]"
+
+dev-install-ml: ## Install dev + test + ML dependencies (CPU-only torch)
+	pip install torch --index-url https://download.pytorch.org/whl/cpu
+	pip install -e ".[dev,test,ml]"
 
 test: ## Run the test suite with coverage
 	pytest --cov --cov-report=term-missing --cov-report=html

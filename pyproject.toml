@@ -33,6 +33,7 @@ dependencies = [
     "click>=8.0",
     "rich>=13.0",
     "structlog>=23.0",
+    "numpy>=1.24",
 ]
 
 [project.optional-dependencies]
@@ -49,10 +50,8 @@ test = [
     "pytest-asyncio>=0.21",
 ]
 ml = [
-    "numpy>=1.24",
     "transformers>=4.30",
     "sentence-transformers>=2.2",
-    "torch>=2.0",
     "spacy>=3.5",
 ]
 secrets = [

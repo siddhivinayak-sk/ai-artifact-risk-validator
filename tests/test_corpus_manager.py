@@ -7,12 +7,11 @@ import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import numpy as np
 import pytest
 
-np = pytest.importorskip("numpy")
-
-from ai_artifact_risk_validator.semantic.corpus import CorpusManager  # noqa: E402
-from ai_artifact_risk_validator.semantic.embeddings import EmbeddingEngine  # noqa: E402
+from ai_artifact_risk_validator.semantic.corpus import CorpusManager
+from ai_artifact_risk_validator.semantic.embeddings import EmbeddingEngine
 
 
 @pytest.fixture
