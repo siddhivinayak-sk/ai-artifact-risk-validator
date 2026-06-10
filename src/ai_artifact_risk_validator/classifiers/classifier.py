@@ -297,9 +297,9 @@ class ArtifactClassifier:
         """Check if semantic scoring is available (lazy, cached)."""
         if self._semantic_available is None:
             try:
-                from ai_artifact_risk_validator.semantic.embeddings import EmbeddingEngine
+                from ai_artifact_risk_validator.semantic.embeddings import get_shared_engine
 
-                self._semantic_available = EmbeddingEngine().is_available
+                self._semantic_available = get_shared_engine().is_available
             except Exception:
                 self._semantic_available = False
         return self._semantic_available

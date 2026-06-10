@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from ai_artifact_risk_validator._internal.logging import get_logger
-from ai_artifact_risk_validator.semantic.embeddings import EmbeddingEngine
+from ai_artifact_risk_validator.semantic.embeddings import EmbeddingEngine, get_shared_engine
 
 if TYPE_CHECKING:
     import numpy as np
@@ -50,7 +50,7 @@ class CorpusManager:
         engine: EmbeddingEngine | None = None,
         corpora_dir: Path | None = None,
     ) -> None:
-        self._engine = engine or EmbeddingEngine()
+        self._engine = engine or get_shared_engine()
         self._corpora_dir = corpora_dir or _CORPORA_DIR
         self._sentences: dict[str, list[str]] = {}
         self._embeddings: dict[str, np.ndarray[tuple[Any, ...], np.dtype[Any]]] = {}

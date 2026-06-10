@@ -180,3 +180,19 @@ class EmbeddingEngine:
             64-character hex string.
         """
         return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+# --- Module-level singleton ---
+_shared_engine: EmbeddingEngine | None = None
+
+
+def get_shared_engine() -> EmbeddingEngine:
+    """Return a module-level singleton ``EmbeddingEngine``.
+
+    Ensures the model is loaded at most once per process, avoiding
+    repeated weight loading when multiple scanners use embeddings.
+    """
+    global _shared_engine
+    if _shared_engine is None:
+        _shared_engine = EmbeddingEngine()
+    return _shared_engine

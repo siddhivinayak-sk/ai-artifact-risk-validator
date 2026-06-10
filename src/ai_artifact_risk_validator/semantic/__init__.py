@@ -10,7 +10,7 @@ from ai_artifact_risk_validator.semantic.batch_processor import BatchProcessor
 from ai_artifact_risk_validator.semantic.cache import EmbeddingCache
 from ai_artifact_risk_validator.semantic.chunker import chunk_text
 from ai_artifact_risk_validator.semantic.corpus import CorpusManager
-from ai_artifact_risk_validator.semantic.embeddings import EmbeddingEngine
+from ai_artifact_risk_validator.semantic.embeddings import EmbeddingEngine, get_shared_engine
 from ai_artifact_risk_validator.semantic.intent_classifier import ContentIntent, IntentClassifier
 from ai_artifact_risk_validator.semantic.similarity import SimilarityScorer
 
@@ -23,4 +23,5 @@ __all__ = [
     "IntentClassifier",
     "SimilarityScorer",
     "chunk_text",
+    "get_shared_engine",
 ]

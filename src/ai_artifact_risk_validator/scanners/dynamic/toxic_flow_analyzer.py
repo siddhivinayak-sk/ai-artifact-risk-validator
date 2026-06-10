@@ -129,10 +129,10 @@ class SemanticFlowClassifier:
         if self._available is None:
             try:
                 from ai_artifact_risk_validator.semantic.embeddings import (
-                    EmbeddingEngine,
+                    get_shared_engine,
                 )
 
-                self._available = EmbeddingEngine().is_available
+                self._available = get_shared_engine().is_available
             except Exception:
                 self._available = False
         return self._available

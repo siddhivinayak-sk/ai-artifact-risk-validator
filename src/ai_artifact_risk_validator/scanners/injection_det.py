@@ -448,9 +448,9 @@ class SemanticInjectionAnalyzer:
         """Check if semantic analysis is available."""
         if self._available is None:
             try:
-                from ai_artifact_risk_validator.semantic.embeddings import EmbeddingEngine
+                from ai_artifact_risk_validator.semantic.embeddings import get_shared_engine
 
-                engine = EmbeddingEngine()
+                engine = get_shared_engine()
                 self._available = engine.is_available
             except Exception:
                 self._available = False

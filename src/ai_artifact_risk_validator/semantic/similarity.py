@@ -10,7 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from ai_artifact_risk_validator._internal.logging import get_logger
-from ai_artifact_risk_validator.semantic.embeddings import EmbeddingEngine
+from ai_artifact_risk_validator.semantic.embeddings import EmbeddingEngine, get_shared_engine
 
 logger = get_logger(__name__)
 
@@ -27,7 +27,7 @@ class SimilarityScorer:
     """
 
     def __init__(self, engine: EmbeddingEngine | None = None) -> None:
-        self._engine = engine or EmbeddingEngine()
+        self._engine = engine or get_shared_engine()
 
     @property
     def is_available(self) -> bool:
