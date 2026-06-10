@@ -8,12 +8,45 @@ issues gracefully by logging warnings and skipping problematic files.
 from __future__ import annotations
 
 import fnmatch
+import os
 from pathlib import Path
 
 from ai_artifact_risk_validator._internal.logging import get_logger
 from ai_artifact_risk_validator.models.config import ValidatorConfig
 
 logger = get_logger(__name__)
+
+# Directories that are always skipped during traversal.
+# These contain build artifacts, VCS internals, caches, or dependency
+# trees that are never useful AI artifacts.
+_ALWAYS_SKIP_DIRS: frozenset[str] = frozenset(
+    {
+        ".git",
+        ".hg",
+        ".svn",
+        ".venv",
+        "venv",
+        "env",
+        ".env",
+        "node_modules",
+        "__pycache__",
+        ".mypy_cache",
+        ".ruff_cache",
+        ".pytest_cache",
+        ".tox",
+        ".nox",
+        ".eggs",
+        "*.egg-info",
+        "dist",
+        "build",
+        ".idea",
+        ".vscode",
+        ".kiro",
+        "htmlcov",
+        ".coverage",
+        ".terraform",
+    }
+)
 
 
 class FileDiscovery:
@@ -65,6 +98,11 @@ class FileDiscovery:
     def _walk_directory(self, directory: Path) -> list[Path]:
         """Recursively walk a directory and collect files passing filters.
 
+        Uses ``os.walk`` with ``topdown=True`` to prune well-known
+        non-artifact directories (e.g. ``.git``, ``.venv``,
+        ``node_modules``) *before* descending into them, avoiding
+        unnecessary I/O on potentially thousands of irrelevant files.
+
         Args:
             directory: The directory to walk.
 
@@ -74,41 +112,59 @@ class FileDiscovery:
         discovered: list[Path] = []
 
         try:
-            entries = list(directory.rglob("*"))
+            for dirpath, dirnames, filenames in os.walk(directory, topdown=True):
+                # Prune directories in-place so os.walk skips them
+                dirnames[:] = [d for d in dirnames if not self._should_skip_dir(d)]
+
+                for fname in filenames:
+                    file_path = Path(dirpath) / fname
+                    try:
+                        if self._passes_filters(file_path):
+                            discovered.append(file_path)
+                    except PermissionError:
+                        logger.warning(
+                            "Permission denied accessing file",
+                            artifact_path=str(file_path),
+                        )
+                    except OSError as e:
+                        logger.warning(
+                            "OS error accessing file",
+                            artifact_path=str(file_path),
+                            error=str(e),
+                        )
         except PermissionError:
             logger.warning(
                 "Permission denied accessing directory",
                 artifact_path=str(directory),
             )
-            return []
         except OSError as e:
             logger.warning(
                 "OS error accessing directory",
                 artifact_path=str(directory),
                 error=str(e),
             )
-            return []
-
-        for entry in entries:
-            if not entry.is_file():
-                continue
-
-            try:
-                if self._passes_filters(entry):
-                    discovered.append(entry)
-            except PermissionError:
-                logger.warning(
-                    "Permission denied accessing file",
-                    artifact_path=str(entry),
-                )
-            except OSError as e:
-                logger.warning(
-                    "OS error accessing file",
-                    artifact_path=str(entry),
-                    error=str(e),
-                )
 
         return discovered
+
+    @staticmethod
+    def _should_skip_dir(dirname: str) -> bool:
+        """Check whether a directory name should be pruned from traversal.
+
+        Matches against the ``_ALWAYS_SKIP_DIRS`` set. Supports both exact
+        matches and fnmatch-style patterns (e.g. ``*.egg-info``).
+
+        Args:
+            dirname: The directory's base name.
+
+        Returns:
+            True if the directory should be skipped.
+        """
+        if dirname in _ALWAYS_SKIP_DIRS:
+            return True
+        # Support glob patterns like *.egg-info
+        return any(
+            fnmatch.fnmatch(dirname, pat) for pat in _ALWAYS_SKIP_DIRS if "*" in pat or "?" in pat
+        )
 
     def _passes_filters(self, file_path: Path) -> bool:
         """Check whether a file passes all configured filters.

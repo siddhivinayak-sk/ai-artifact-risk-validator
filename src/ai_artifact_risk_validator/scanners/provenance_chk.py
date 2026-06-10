@@ -846,8 +846,8 @@ class ProvenanceChkScanner(BaseScanner):
 
         # Skip provenance/integrity/signature checks for MCP client config files.
         # These are connection configs (url, command, args) — not server packages.
-        is_mcp_client_config = (
-            artifact_type == ArtifactType.MCP and self._is_mcp_client_config(artifact_content)
+        is_mcp_client_config = artifact_type == ArtifactType.MCP and self._is_mcp_client_config(
+            artifact_content
         )
 
         if not is_mcp_client_config:

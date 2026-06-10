@@ -726,10 +726,10 @@ class SecretScanScanner(BaseScanner):
         if presidio is not None:
             # Entity types that are not actual PII/credential risks in config files
             _PRESIDIO_SKIP_ENTITIES: set[str] = {
-                "URL",           # URLs are expected in MCP/API configs
-                "DATE_TIME",     # Timestamps are not PII
-                "NRP",           # Nationality/religious/political group — too noisy
-                "LOCATION",      # Location names are not credential leaks
+                "URL",  # URLs are expected in MCP/API configs
+                "DATE_TIME",  # Timestamps are not PII
+                "NRP",  # Nationality/religious/political group — too noisy
+                "LOCATION",  # Location names are not credential leaks
             }
             try:
                 results = presidio.analyze(text=content, language="en")
