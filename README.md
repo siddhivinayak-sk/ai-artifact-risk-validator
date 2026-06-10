@@ -35,7 +35,7 @@ Key features:
 - **Parallel execution** — concurrent file and scanner processing for fast scans
 - **Configurable gates** — BLOCK/WARN/INFO decisions with confidence-based downgrade
 - **Semantic analysis** — Optional embedding-based detection using sentence-transformers for paraphrased attack detection, compliance gap analysis, and false positive reduction
-- **Multiple output formats** — JSON, rich terminal text, and HTML reports
+- **Multiple output formats** — JSON, rich terminal text, HTML, and SARIF v2.1.0 reports
 - **CI/CD integration** — exit codes map to gate decisions (0=PASS, 1=BLOCK, 2=WARN)
 - **False positive management** — inline suppression comments and config-based rules
 
@@ -204,6 +204,12 @@ ai-artifact-validator verify ./my-artifacts --format html
 
 # Save HTML report to file
 ai-artifact-validator verify ./my-artifacts --format html --output report.html
+
+# Output as SARIF v2.1.0 (for GitHub Code Scanning, Azure DevOps, VS Code SARIF Viewer)
+ai-artifact-validator verify ./my-artifacts --format sarif
+
+# Save SARIF report to file
+ai-artifact-validator verify ./my-artifacts --format sarif --output report.sarif
 
 # --- Dynamic MCP scanning ---
 
@@ -856,6 +862,73 @@ Path("report.html").write_text(html, encoding="utf-8")
 | `report` | `ScanReport` | The scan report to format |
 
 **Returns:** `str` — A complete standalone HTML document.
+
+### `format_sarif` function
+
+```python
+from ai_artifact_risk_validator.reporting.formatters.sarif_formatter import format_sarif
+```
+
+Formats a `ScanReport` as a SARIF v2.1.0 compliant JSON document. The output integrates with GitHub Code Scanning, Azure DevOps, VS Code SARIF Viewer, and other SARIF-consuming tools.
+
+```python
+from ai_artifact_risk_validator import Validator
+from ai_artifact_risk_validator.reporting.formatters.sarif_formatter import format_sarif
+from pathlib import Path
+
+validator = Validator()
+report = validator.verify("path/to/artifacts")
+
+# Generate SARIF JSON string
+sarif = format_sarif(report)
+
+# Write to file
+Path("report.sarif").write_text(sarif, encoding="utf-8")
+```
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `report` | `ScanReport` | The scan report to format |
+
+**Returns:** `str` — A SARIF v2.1.0 JSON document with sorted keys and 2-space indentation.
+
+**Raises:** `ValueError` — If the report contains data that cannot be serialized to valid SARIF.
+
+The SARIF output includes:
+- One result per finding with severity levels mapped from gate actions (BLOCK→error, WARN→warning, INFO→note)
+- Rule descriptors with titles, descriptions, and remediation guidance
+- Physical locations with file URIs and line ranges
+- Properties bags with severity scores, confidence, category, and evidence
+- Suppression entries for findings marked as false positives
+- Invocation metadata (timestamp, command line, success status)
+
+### `SarifParser` class
+
+```python
+from ai_artifact_risk_validator.reporting import SarifParser
+```
+
+Parses SARIF v2.1.0 JSON documents back into `ScanReport` objects, supporting round-trip serialization.
+
+```python
+from ai_artifact_risk_validator.reporting import SarifParser
+from ai_artifact_risk_validator.reporting.formatters.sarif_formatter import format_sarif
+
+# Round-trip: format then parse
+sarif_json = format_sarif(report)
+parser = SarifParser()
+restored_report = parser.parse(sarif_json)
+
+# The restored report preserves finding IDs, gate actions, and descriptions
+assert len(restored_report.findings) == len(report.findings)
+assert restored_report.summary.gate_decision == report.summary.gate_decision
+```
+
+| Method | Parameters | Returns | Description |
+|--------|-----------|---------|-------------|
+| `parse(json_str)` | `json_str: str` | `ScanReport` | Parse a SARIF JSON string into a ScanReport |
+
+**Raises:** `ValueError` — If the JSON is malformed, missing required SARIF structure, or missing required properties bag keys on results.
 
 ---
 
