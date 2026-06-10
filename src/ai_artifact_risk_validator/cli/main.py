@@ -52,7 +52,7 @@ def cli() -> None:
 @click.option(
     "--format",
     "output_format",
-    type=click.Choice(["json", "text", "html"], case_sensitive=False),
+    type=click.Choice(["json", "text", "html", "sarif"], case_sensitive=False),
     default="text",
     help="Output format for the report.",
 )
@@ -153,6 +153,7 @@ def verify(
     from ai_artifact_risk_validator.models.config import ValidatorConfig
     from ai_artifact_risk_validator.models.enums import ScannerModule
     from ai_artifact_risk_validator.reporting.formatters.html_formatter import format_html
+    from ai_artifact_risk_validator.reporting.formatters.sarif_formatter import format_sarif
     from ai_artifact_risk_validator.reporting.formatters.text_formatter import format_text
     from ai_artifact_risk_validator.reporting.serializer import ReportSerializer
     from ai_artifact_risk_validator.validator import Validator
@@ -253,6 +254,8 @@ def verify(
         report_output = format_text(report)
     elif output_format == "html":
         report_output = format_html(report)
+    elif output_format == "sarif":
+        report_output = format_sarif(report)
     else:
         serializer = ReportSerializer()
         report_output = serializer.serialize(report)
