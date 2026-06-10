@@ -38,7 +38,7 @@ class TestValidatorInit:
     def test_version_property(self):
         """Version property returns the package version string."""
         v = Validator()
-        assert v.version == "0.5.0"
+        assert v.version == "0.6.0"
 
 
 class TestVerifyNonExistentPath:
@@ -182,7 +182,7 @@ class TestVerifyGracefulDegradation:
         """Reports include the scanner version."""
         v = Validator()
         report = v.verify("/nonexistent/xyz")
-        assert report.scanner_version == "0.5.0"
+        assert report.scanner_version == "0.6.0"
 
 
 class TestVerifyReportStructure:

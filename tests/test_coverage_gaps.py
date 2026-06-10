@@ -709,7 +709,7 @@ class TestPackageInit:
         """__version__ is accessible."""
         import ai_artifact_risk_validator
 
-        assert ai_artifact_risk_validator.__version__ == "0.5.0"
+        assert ai_artifact_risk_validator.__version__ == "0.6.0"
 
 
 # =============================================================================
