@@ -79,17 +79,13 @@ class TestCrossFileAnalyzerAvailability:
 
     def test_unavailable_when_embedding_unavailable(self):
         analyzer = CrossFileAnalyzer()
-        with patch(
-            "ai_artifact_risk_validator.semantic.embeddings.get_shared_engine"
-        ) as mock_fn:
+        with patch("ai_artifact_risk_validator.semantic.embeddings.get_shared_engine") as mock_fn:
             mock_fn.return_value.is_available = False
             assert analyzer.is_available is False
 
     def test_available_when_embedding_available(self):
         analyzer = CrossFileAnalyzer()
-        with patch(
-            "ai_artifact_risk_validator.semantic.embeddings.get_shared_engine"
-        ) as mock_fn:
+        with patch("ai_artifact_risk_validator.semantic.embeddings.get_shared_engine") as mock_fn:
             mock_fn.return_value.is_available = True
             assert analyzer.is_available is True
 

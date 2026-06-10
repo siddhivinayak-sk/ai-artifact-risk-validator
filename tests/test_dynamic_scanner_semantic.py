@@ -68,9 +68,7 @@ class TestSemanticToolAnalyzer:
 
     def test_is_available_false_when_engine_unavailable(self):
         analyzer = SemanticToolAnalyzer()
-        with patch(
-            "ai_artifact_risk_validator.semantic.embeddings.get_shared_engine"
-        ) as mock_fn:
+        with patch("ai_artifact_risk_validator.semantic.embeddings.get_shared_engine") as mock_fn:
             mock_fn.return_value.is_available = False
             assert analyzer.is_available is False
 
