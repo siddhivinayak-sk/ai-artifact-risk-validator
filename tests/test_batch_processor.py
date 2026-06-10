@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import numpy as np
 import pytest
 
-from ai_artifact_risk_validator.semantic.batch_processor import BatchProcessor
+np = pytest.importorskip("numpy")
+
+from ai_artifact_risk_validator.semantic.batch_processor import BatchProcessor  # noqa: E402
 
 
 @pytest.fixture()

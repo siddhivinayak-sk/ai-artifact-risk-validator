@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import numpy as np
 import pytest
 
-from ai_artifact_risk_validator.models import ArtifactType
-from ai_artifact_risk_validator.scanners.quality_lint import (
+np = pytest.importorskip("numpy")
+
+from ai_artifact_risk_validator.models import ArtifactType  # noqa: E402
+from ai_artifact_risk_validator.scanners.quality_lint import (  # noqa: E402
     QualityLintScanner,
     SemanticQualityAnalyzer,
     _count_syllables,

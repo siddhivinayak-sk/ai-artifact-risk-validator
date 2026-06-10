@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import numpy as np
+import pytest
 
-from ai_artifact_risk_validator.semantic.intent_classifier import (
+np = pytest.importorskip("numpy")
+
+from ai_artifact_risk_validator.semantic.intent_classifier import (  # noqa: E402
     _INTENT_CORPORA,
     ContentIntent,
     IntentClassifier,

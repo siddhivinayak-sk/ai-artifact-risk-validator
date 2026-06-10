@@ -2,10 +2,11 @@
 
 from unittest.mock import MagicMock, patch
 
-import numpy as np
 import pytest
 
-from ai_artifact_risk_validator.models import (
+np = pytest.importorskip("numpy")
+
+from ai_artifact_risk_validator.models import (  # noqa: E402
     ArtifactType,
     FindingLocation,
     GateAction,
@@ -14,7 +15,7 @@ from ai_artifact_risk_validator.models import (
     ScannerModule,
     SeverityLabel,
 )
-from ai_artifact_risk_validator.scanners.injection_det import InjectionDetScanner
+from ai_artifact_risk_validator.scanners.injection_det import InjectionDetScanner  # noqa: E402
 
 
 @pytest.fixture

@@ -52,7 +52,7 @@ pip install ai-artifact-risk-validator
 ### With optional scanner dependencies
 
 ```bash
-# ML-based scanners (injection detection, bias detection)
+# ML/semantic analysis (sentence-transformers, numpy, torch — required for semantic features)
 pip install ai-artifact-risk-validator[ml]
 
 # Secret detection (detect-secrets, presidio)
@@ -77,6 +77,8 @@ pip install ai-artifact-risk-validator[all]
 git clone https://github.com/ai-artifact-validator/ai-artifact-risk-validator.git
 cd ai-artifact-risk-validator
 pip install -e ".[dev,test]"
+# Include semantic/ML features for development:
+pip install -e ".[dev,test,ml]"
 ```
 
 ### Requirements

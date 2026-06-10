@@ -6,10 +6,11 @@ import tempfile
 import time
 from pathlib import Path
 
-import numpy as np
 import pytest
 
-from ai_artifact_risk_validator.semantic.cache import EmbeddingCache
+np = pytest.importorskip("numpy")
+
+from ai_artifact_risk_validator.semantic.cache import EmbeddingCache  # noqa: E402
 
 
 @pytest.fixture

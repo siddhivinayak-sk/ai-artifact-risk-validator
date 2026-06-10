@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-import numpy as np
 import pytest
 
-from ai_artifact_risk_validator.semantic.embeddings import EmbeddingEngine
-from ai_artifact_risk_validator.semantic.similarity import SimilarityScorer
+np = pytest.importorskip("numpy")
+
+from ai_artifact_risk_validator.semantic.embeddings import EmbeddingEngine  # noqa: E402
+from ai_artifact_risk_validator.semantic.similarity import SimilarityScorer  # noqa: E402
 
 
 @pytest.fixture

@@ -64,7 +64,10 @@ class EmbeddingEngine:
                 self._available = True
             except ImportError:
                 self._available = False
-                logger.info("sentence-transformers not installed; semantic features disabled")
+                logger.info(
+                    "sentence-transformers not installed; semantic features disabled."
+                    " Install with: pip install ai-artifact-risk-validator[ml]"
+                )
         return self._available
 
     def _get_model(self) -> Any:
