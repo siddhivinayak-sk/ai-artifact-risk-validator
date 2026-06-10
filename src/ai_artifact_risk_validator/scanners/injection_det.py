@@ -3,8 +3,17 @@
 Detects direct/indirect prompt injection, role confusion, jailbreak patterns,
 unicode anomalies, and safety guardrail weakening across multiple artifact types.
 
-Operates in regex-only fallback mode when ML dependencies (transformers,
-sentence-transformers) are unavailable, maintaining same precision with lower recall.
+Uses a hybrid detection strategy:
+  1. **Regex pass** — fast pattern matching (always available)
+  2. **Semantic pass** — cosine similarity against reference corpora
+     (only when ``sentence-transformers`` is installed)
+
+When both regex and semantic signals fire, confidence is boosted to 0.95+.
+When regex fires but semantic similarity is low, confidence is capped to
+reduce false positives on documentation/educational content.
+
+Operates in regex-only fallback mode when ML dependencies are unavailable,
+maintaining same precision with lower recall.
 """
 
 from __future__ import annotations
@@ -13,6 +22,7 @@ import re
 import unicodedata
 from typing import Any
 
+from ai_artifact_risk_validator._internal.logging import get_logger
 from ai_artifact_risk_validator.models import (
     ArtifactType,
     FindingLocation,
@@ -24,6 +34,8 @@ from ai_artifact_risk_validator.models import (
     SeverityLabel,
 )
 from ai_artifact_risk_validator.scanners.base import BaseScanner
+
+logger = get_logger(__name__)
 
 # ============================================================
 # Regex Pattern Definitions
@@ -394,6 +406,242 @@ _ARTIFACT_RISK_MAP: dict[ArtifactType, list[str]] = {
     ArtifactType.SKILL: ["P-S1", "P-S2", "P-S6", "P-S7", "P-S9", "P-S10"],
 }
 
+# ============================================================
+# Semantic Injection Analyzer (hybrid detection layer)
+# ============================================================
+
+# Detection categories that map to specific corpora for semantic matching
+_CATEGORY_CORPUS_MAP: dict[str, str] = {
+    "direct_injection": "injection",
+    "context_poisoning": "injection",
+    "jailbreak": "jailbreak",
+    "guardrail_weakening": "guardrail_weakening",
+    "bias_injection": "bias",
+}
+
+# Confidence thresholds for semantic boosting / capping
+_SEMANTIC_HIGH_THRESHOLD: float = 0.65
+_SEMANTIC_LOW_THRESHOLD: float = 0.40
+_BOOSTED_CONFIDENCE: float = 0.95
+_CAPPED_CONFIDENCE: float = 0.40
+
+
+class SemanticInjectionAnalyzer:
+    """Semantic second-pass analyzer for injection detection.
+
+    Uses cosine similarity against reference corpora to:
+      - **Boost** confidence when regex + semantic both fire (→ 0.95)
+      - **Cap** confidence when regex fires but semantic is low (→ 0.40)
+      - **Discover** new findings missed by regex (semantic-only detections)
+
+    Gracefully degrades to a no-op when ``sentence-transformers`` is not
+    installed, returning findings unchanged.
+    """
+
+    def __init__(self) -> None:
+        self._scorer: Any | None = None
+        self._corpus_mgr: Any | None = None
+        self._available: bool | None = None
+
+    @property
+    def is_available(self) -> bool:
+        """Check if semantic analysis is available."""
+        if self._available is None:
+            try:
+                from ai_artifact_risk_validator.semantic.embeddings import get_shared_engine
+
+                engine = get_shared_engine()
+                self._available = engine.is_available
+            except Exception:
+                self._available = False
+        return self._available
+
+    def _ensure_loaded(self) -> bool:
+        """Lazily initialize scorer and corpus manager.
+
+        Returns:
+            ``True`` if semantic components are ready, ``False`` otherwise.
+        """
+        if not self.is_available:
+            return False
+
+        if self._scorer is None:
+            from ai_artifact_risk_validator.semantic.corpus import CorpusManager
+            from ai_artifact_risk_validator.semantic.similarity import SimilarityScorer
+
+            self._scorer = SimilarityScorer()
+            self._corpus_mgr = CorpusManager()
+        return True
+
+    def refine_findings(
+        self,
+        content: str,
+        findings: list[ScanFinding],
+    ) -> list[ScanFinding]:
+        """Refine regex findings with semantic similarity scores.
+
+        For each regex finding, compute cosine similarity of the matched line
+        against the appropriate reference corpus and adjust confidence:
+          - regex + high semantic → confidence = 0.95
+          - regex + low semantic  → confidence = min(original, 0.40)
+
+        Args:
+            content: Full artifact text.
+            findings: Regex-detected findings to refine.
+
+        Returns:
+            The same list (mutated in-place) with adjusted confidences.
+        """
+        if not self._ensure_loaded():
+            return findings
+
+        lines = content.splitlines()
+
+        for finding in findings:
+            category = self._finding_to_category(finding)
+            corpus_name = _CATEGORY_CORPUS_MAP.get(category)
+            if not corpus_name:
+                continue
+
+            # Get the text around the finding for semantic comparison
+            text_to_check = self._extract_context(finding, lines)
+            if not text_to_check:
+                continue
+
+            score = self._score_text(text_to_check, corpus_name)
+            if score >= _SEMANTIC_HIGH_THRESHOLD:
+                finding.confidence = max(finding.confidence, _BOOSTED_CONFIDENCE)
+            elif score < _SEMANTIC_LOW_THRESHOLD:
+                finding.confidence = min(finding.confidence, _CAPPED_CONFIDENCE)
+
+        return findings
+
+    def discover_semantic_only(
+        self,
+        content: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+        applicable_risks: list[str],
+    ) -> list[ScanFinding]:
+        """Find injection patterns missed by regex using semantic search.
+
+        Splits content into lines and scores each against the injection and
+        jailbreak corpora. Lines with similarity above the high threshold
+        that were NOT already caught by regex are reported.
+
+        Args:
+            content: Full artifact text.
+            artifact_type: Classified type of the artifact.
+            artifact_path: File path of the artifact.
+            applicable_risks: Risk IDs applicable to this artifact type.
+
+        Returns:
+            List of new ScanFindings (may be empty).
+        """
+        if not self._ensure_loaded():
+            return []
+
+        findings: list[ScanFinding] = []
+        lines = content.splitlines()
+
+        # Map corpus → preferred risk IDs for discovered findings
+        corpus_risk_prefs: list[tuple[str, list[str]]] = [
+            ("injection", ["P-S1", "I-S1", "ST-S1", "MCP-S6", "M-S1", "RAG-S1", "OW-S1", "A-S4"]),
+            ("jailbreak", ["P-S7", "I-S2", "ST-S5", "A-S4", "MCP-S6", "M-S1", "RAG-S1", "OW-S1"]),
+            ("guardrail_weakening", ["ST-S5", "I-S2", "P-S7", "A-S4", "MCP-S6"]),
+        ]
+
+        for corpus_name, preferred_ids in corpus_risk_prefs:
+            risk_id = _pick_risk_id(applicable_risks, preferred_ids)
+            if not risk_id:
+                continue
+
+            for line_idx, line in enumerate(lines):
+                stripped = line.strip()
+                if len(stripped) < 10:
+                    continue
+
+                score = self._score_text(stripped, corpus_name)
+                if score >= _SEMANTIC_HIGH_THRESHOLD:
+                    meta = _RISK_METADATA.get(risk_id)
+                    if not meta:
+                        continue
+                    findings.append(
+                        ScanFinding(
+                            id=risk_id,
+                            artifact_type=artifact_type,
+                            artifact_path=artifact_path,
+                            severity_score=meta["severity_score"],
+                            severity_label=meta["severity_label"],
+                            priority=meta["priority"],
+                            gate_action=meta["gate_action"],
+                            category=RiskCategory.SECURITY,
+                            title=f"{meta['title']} (semantic)",
+                            description=meta["description"],
+                            location=FindingLocation(line=line_idx + 1),
+                            evidence=stripped[:200],
+                            confidence=0.75,
+                            scanner_module=ScannerModule.INJECTION_DET,
+                            remediation=meta["remediation"],
+                            references=["LLM01:2025 Prompt Injection"],
+                        )
+                    )
+
+        return findings
+
+    def _score_text(self, text: str, corpus_name: str) -> float:
+        """Score text against a named corpus.
+
+        Returns:
+            Max cosine similarity (0.0 – 1.0), or 0.0 on error.
+        """
+        try:
+            assert self._corpus_mgr is not None
+            assert self._scorer is not None
+            corpus_sentences = self._corpus_mgr.load_corpus(corpus_name)
+            embeddings = self._scorer.encode(corpus_sentences)
+            if embeddings is None:
+                return 0.0
+            result: float = self._scorer.score_against_corpus(text, embeddings)
+            return result
+        except Exception:
+            logger.debug("Semantic scoring failed", corpus=corpus_name, exc_info=True)
+            return 0.0
+
+    @staticmethod
+    def _finding_to_category(finding: ScanFinding) -> str:
+        """Map a finding to a semantic category name."""
+        title_lower = finding.title.lower()
+        if "jailbreak" in title_lower:
+            return "jailbreak"
+        if "guardrail" in title_lower or "safety" in title_lower:
+            return "guardrail_weakening"
+        if "bias" in title_lower:
+            return "bias_injection"
+        if "injection" in title_lower or "override" in title_lower or "confusion" in title_lower:
+            return "direct_injection"
+        return "direct_injection"
+
+    @staticmethod
+    def _extract_context(finding: ScanFinding, lines: list[str]) -> str | None:
+        """Extract text around the finding location for semantic scoring."""
+        if finding.location and finding.location.line is not None:
+            line_idx = finding.location.line - 1
+            if 0 <= line_idx < len(lines):
+                return lines[line_idx].strip()
+        # Fall back to evidence text
+        if finding.evidence:
+            return finding.evidence
+        return None
+
+
+def _pick_risk_id(applicable: list[str], preferred: list[str]) -> str | None:
+    """Pick the first preferred risk ID that is in the applicable list."""
+    for rid in preferred:
+        if rid in applicable:
+            return rid
+    return None
+
 
 class InjectionDetScanner(BaseScanner):
     """Scanner for detecting prompt injection and related attacks.
@@ -409,6 +657,7 @@ class InjectionDetScanner(BaseScanner):
     def __init__(self) -> None:
         """Initialize the InjectionDet scanner."""
         self._ml_available: bool | None = None
+        self._semantic: SemanticInjectionAnalyzer = SemanticInjectionAnalyzer()
 
     @property
     def name(self) -> ScannerModule:
@@ -534,6 +783,23 @@ class InjectionDetScanner(BaseScanner):
                 artifact_content, artifact_type, artifact_path, applicable_risks
             )
         )
+
+        # --- Semantic second pass ---
+        # Refine regex finding confidences using similarity scoring
+        self._semantic.refine_findings(artifact_content, findings)
+
+        # Discover injection patterns missed by regex
+        semantic_findings = self._semantic.discover_semantic_only(
+            artifact_content, artifact_type, artifact_path, applicable_risks
+        )
+        # De-duplicate: skip semantic findings whose line already has a regex finding
+        existing_lines = {
+            f.location.line for f in findings if f.location and f.location.line is not None
+        }
+        for sf in semantic_findings:
+            if sf.location and sf.location.line in existing_lines:
+                continue
+            findings.append(sf)
 
         return findings
 

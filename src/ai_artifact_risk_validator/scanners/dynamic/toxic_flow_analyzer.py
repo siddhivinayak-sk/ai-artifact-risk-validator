@@ -16,7 +16,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
 
+from ai_artifact_risk_validator._internal.logging import get_logger
 from ai_artifact_risk_validator.models.enums import (
     ArtifactType,
     GateAction,
@@ -27,6 +29,11 @@ from ai_artifact_risk_validator.models.enums import (
 )
 from ai_artifact_risk_validator.models.findings import FindingLocation, ScanFinding
 from ai_artifact_risk_validator.models.mcp_models import MCPToolInfo
+
+if TYPE_CHECKING:
+    from ai_artifact_risk_validator.semantic.similarity import SimilarityScorer
+
+logger = get_logger(__name__)
 
 
 class ToolCategory:
@@ -70,6 +77,104 @@ class ClassifiedTool:
     categories: list[str] = field(default_factory=list)
 
 
+# ============================================================
+# Semantic flow category corpora
+# ============================================================
+
+_INPUT_CORPUS: list[str] = [
+    "Fetch a web page from a URL.",
+    "Read input from the user.",
+    "Download a remote resource.",
+    "Accept external data.",
+    "Scrape content from a website.",
+    "Receive incoming messages.",
+]
+
+_SENSITIVE_CORPUS: list[str] = [
+    "Access database credentials.",
+    "Read the private key file.",
+    "Retrieve secret configuration.",
+    "Look up stored passwords.",
+    "Query the authentication token.",
+    "Load the encryption certificate.",
+]
+
+_TRANSMISSION_CORPUS: list[str] = [
+    "Send data to an external server.",
+    "Upload a file to a remote endpoint.",
+    "Email the report to the user.",
+    "Post results to a webhook.",
+    "Forward the message externally.",
+    "Transmit logs to the monitoring service.",
+]
+
+_SEMANTIC_FLOW_THRESHOLD: float = 0.50
+
+
+class SemanticFlowClassifier:
+    """Embedding-based tool-category classifier for toxic flow detection.
+
+    Supplements keyword matching by scoring tool descriptions against
+    per-category corpora.  Falls back to no-op when ``sentence-transformers``
+    is not installed.
+    """
+
+    def __init__(self) -> None:
+        self._scorer: SimilarityScorer | None = None
+        self._corpus_map: dict[str, Any] = {}
+        self._available: bool | None = None
+
+    @property
+    def is_available(self) -> bool:
+        if self._available is None:
+            try:
+                from ai_artifact_risk_validator.semantic.embeddings import (
+                    get_shared_engine,
+                )
+
+                self._available = get_shared_engine().is_available
+            except Exception:
+                self._available = False
+        return self._available
+
+    def _ensure_loaded(self) -> bool:
+        if self._scorer is not None:
+            return True
+        if not self.is_available:
+            return False
+        try:
+            from ai_artifact_risk_validator.semantic.similarity import (
+                SimilarityScorer,
+            )
+
+            self._scorer = SimilarityScorer()
+            self._corpus_map = {
+                ToolCategory.EXTERNAL_INPUT: self._scorer.encode(_INPUT_CORPUS),
+                ToolCategory.SENSITIVE_DATA: self._scorer.encode(_SENSITIVE_CORPUS),
+                ToolCategory.DATA_TRANSMISSION: self._scorer.encode(_TRANSMISSION_CORPUS),
+            }
+            return True
+        except Exception:
+            logger.debug("SemanticFlowClassifier init failed", exc_info=True)
+            self._available = False
+            return False
+
+    def classify(self, text: str) -> list[str]:
+        """Return flow categories whose corpus similarity exceeds the threshold."""
+        if not self._ensure_loaded() or self._scorer is None:
+            return []
+        cats: list[str] = []
+        for cat, embs in self._corpus_map.items():
+            try:
+                score: float = self._scorer.score_against_corpus(text, embs)
+                if score >= _SEMANTIC_FLOW_THRESHOLD:
+                    cats.append(cat)
+            except Exception:
+                logger.debug("Flow classification failed", cat=cat, exc_info=True)
+                continue
+        return cats
+
+
 def _truncate_evidence(tool_name: str, fragment: str, max_length: int = 200) -> str:
     """Format evidence as 'tool_name: fragment' truncated to max_length."""
     prefix = f"{tool_name}: "
@@ -91,6 +196,9 @@ class ToxicFlowAnalyzer:
     This three-stage chain represents a toxic flow that could enable
     credential theft or data exfiltration through the AI agent.
     """
+
+    def __init__(self) -> None:
+        self._semantic = SemanticFlowClassifier()
 
     def classify_tool(self, tool: MCPToolInfo, server_name: str) -> ClassifiedTool:
         """Classify a tool into zero or more flow categories.
@@ -116,6 +224,13 @@ class ToxicFlowAnalyzer:
 
         if _DATA_TRANSMISSION_KEYWORDS.search(text):
             categories.append(ToolCategory.DATA_TRANSMISSION)
+
+        # Semantic second pass: add categories missed by keywords.
+        if self._semantic.is_available:
+            sem_cats = self._semantic.classify(text)
+            for cat in sem_cats:
+                if cat not in categories:
+                    categories.append(cat)
 
         return ClassifiedTool(tool=tool, server_name=server_name, categories=categories)
 

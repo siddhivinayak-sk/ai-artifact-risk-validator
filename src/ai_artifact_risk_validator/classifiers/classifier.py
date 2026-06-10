@@ -2,18 +2,27 @@
 
 Implements the ArtifactClassifier which determines the type of an AI artifact
 based on multiple signals: file extension, path patterns, content markers,
-and directory context. Each signal contributes a weighted score, and the
-artifact type with the highest aggregate score (above the minimum threshold)
-is selected.
+directory context, and (optionally) semantic similarity.
+
+Each signal contributes a weighted score, and the artifact type with the
+highest aggregate score (above the minimum threshold) is selected.
+
+When ``sentence-transformers`` is installed, a fifth *semantic* signal is
+added by comparing file content against per-type reference hints.  The
+semantic weight is redistributed from the existing content signal so that
+classification behaviour is backward-compatible when ML deps are absent.
 """
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
+from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ai_artifact_risk_validator._internal.logging import get_logger
 from ai_artifact_risk_validator.models.enums import ArtifactType
 
 from .patterns import (
@@ -24,8 +33,21 @@ from .patterns import (
     SIGNAL_WEIGHTS,
 )
 
+logger = get_logger(__name__)
+
 # Minimum score threshold for a valid classification
 _CLASSIFICATION_THRESHOLD: float = 0.3
+
+# Weight allocated to the semantic signal (taken from content weight)
+_SEMANTIC_WEIGHT: float = 0.10
+
+# Path to the built-in artifact classifier hints corpus
+_HINTS_PATH: Path = (
+    Path(__file__).resolve().parent.parent
+    / "semantic"
+    / "corpora"
+    / "artifact_classifier_hints.json"
+)
 
 
 class ClassificationResult(BaseModel):
@@ -66,6 +88,12 @@ class ArtifactClassifier:
                 except ValueError:
                     # Skip unknown artifact type names gracefully
                     pass
+
+        # Semantic support (lazy-loaded)
+        self._semantic_available: bool | None = None
+        self._scorer: Any | None = None
+        self._hints: dict[str, list[str]] | None = None
+        self._hint_embeddings: dict[str, Any] | None = None
 
     def classify(self, file_path: Path, content: str | None = None) -> ClassificationResult | None:
         """Classify a file into an artifact type.
@@ -133,10 +161,24 @@ class ArtifactClassifier:
             score += SIGNAL_WEIGHTS["path"]
             signals.append("path")
 
-        # Signal 3: Content match (weight 0.25)
+        # Signals 3 & 5: Content match + Semantic similarity
+        # When semantic is available, content weight is reduced by _SEMANTIC_WEIGHT
+        # and a new semantic signal is added with _SEMANTIC_WEIGHT.
+        semantic_available = self._is_semantic_available()
+        content_weight = SIGNAL_WEIGHTS["content"]
+        if semantic_available:
+            content_weight -= _SEMANTIC_WEIGHT
+
         if content is not None and self._check_content(artifact_type, content):
-            score += SIGNAL_WEIGHTS["content"]
+            score += content_weight
             signals.append("content")
+
+        # Signal 5: Semantic similarity (only when ML deps present)
+        if semantic_available and content is not None:
+            sem_score = self._check_semantic(artifact_type, content)
+            if sem_score > 0.0:
+                score += _SEMANTIC_WEIGHT * sem_score
+                signals.append("semantic")
 
         # Signal 4: Directory context match (weight 0.10)
         if self._check_directory_context(artifact_type, file_path):
@@ -246,6 +288,93 @@ class ArtifactClassifier:
                 continue
 
         return False
+
+    # ------------------------------------------------------------------
+    # Semantic signal helpers
+    # ------------------------------------------------------------------
+
+    def _is_semantic_available(self) -> bool:
+        """Check if semantic scoring is available (lazy, cached)."""
+        if self._semantic_available is None:
+            try:
+                from ai_artifact_risk_validator.semantic.embeddings import get_shared_engine
+
+                self._semantic_available = get_shared_engine().is_available
+            except Exception:
+                self._semantic_available = False
+        return self._semantic_available
+
+    def _load_hints(self) -> dict[str, list[str]]:
+        """Load the artifact classifier hints corpus.
+
+        Returns:
+            Mapping of artifact type value → list of hint sentences.
+        """
+        if self._hints is not None:
+            return self._hints
+
+        try:
+            with _HINTS_PATH.open(encoding="utf-8") as f:
+                self._hints = json.load(f)
+        except Exception:
+            logger.debug("Failed to load classifier hints", path=str(_HINTS_PATH))
+            self._hints = {}
+        return self._hints
+
+    def _get_scorer(self) -> Any:
+        """Lazily create and return the SimilarityScorer."""
+        if self._scorer is None:
+            from ai_artifact_risk_validator.semantic.similarity import SimilarityScorer
+
+            self._scorer = SimilarityScorer()
+        return self._scorer
+
+    def _get_hint_embeddings(self, artifact_type: ArtifactType) -> Any:
+        """Get cached hint embeddings for an artifact type.
+
+        Returns:
+            Numpy array of hint embeddings, or ``None`` if hints are empty.
+        """
+        if self._hint_embeddings is None:
+            self._hint_embeddings = {}
+
+        type_key = artifact_type.value
+        if type_key not in self._hint_embeddings:
+            hints = self._load_hints().get(type_key, [])
+            if not hints:
+                self._hint_embeddings[type_key] = None
+            else:
+                scorer = self._get_scorer()
+                self._hint_embeddings[type_key] = scorer.encode(hints)
+        return self._hint_embeddings[type_key]
+
+    def _check_semantic(self, artifact_type: ArtifactType, content: str) -> float:
+        """Compute semantic similarity of content to artifact type hints.
+
+        Returns a score between 0.0 and 1.0 indicating how well the content
+        matches the reference hints for the given artifact type. Returns 0.0
+        if hints are missing or on any error.
+
+        Args:
+            artifact_type: The artifact type to check against.
+            content: File content to score.
+
+        Returns:
+            Similarity score (0.0 – 1.0).
+        """
+        try:
+            embeddings = self._get_hint_embeddings(artifact_type)
+            if embeddings is None:
+                return 0.0
+
+            # Use first 500 chars of content for efficiency
+            snippet = content[:500]
+            scorer = self._get_scorer()
+            result: float = scorer.score_against_corpus(snippet, embeddings)
+            return result
+        except Exception:
+            logger.debug("Semantic classification failed", artifact_type=artifact_type.value)
+            return 0.0
 
     @staticmethod
     def _read_file_content(file_path: Path) -> str | None:

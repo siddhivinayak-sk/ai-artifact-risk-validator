@@ -1,6 +1,6 @@
-"""Risk definitions for Prompt artifacts (P-S1 through P-Q7).
+"""Risk definitions for Prompt artifacts (P-S1 through P-Q9).
 
-Contains 23 risks covering security, performance, and quality categories
+Contains 25 risks covering security, performance, and quality categories
 for prompt templates and system prompts.
 """
 
@@ -559,6 +559,54 @@ RISKS: list[RiskDefinition] = [
             "Use consistent naming throughout",
         ],
         detection_mechanisms=["Term consistency analysis", "Synonym clustering detection"],
+        scanner_modules=[ScannerModule.QUALITY_LINT],
+        owasp_refs=[],
+        cwe_refs=[],
+    ),
+    RiskDefinition(
+        id="P-Q8",
+        title="Semantic Ambiguity Detected",
+        artifact_types=[ArtifactType.PROMPT],
+        category=RiskCategory.QUALITY,
+        severity_score=4,
+        severity_label=SeverityLabel.LOW,
+        priority=Priority.P3,
+        gate_action=GateAction.INFO,
+        description="Prompt contains semantically ambiguous passages that may cause non-deterministic model behaviour, detected via embedding similarity to known vague instruction corpora.",
+        examples=[
+            "Instructions that paraphrase vague directives without trigger words",
+            "Context-dependent phrasing that changes meaning across scenarios",
+        ],
+        mitigation=[
+            "Rewrite ambiguous passages with precise directives",
+            "Add constraints and expected output formats",
+            "Include concrete examples for unclear instructions",
+        ],
+        detection_mechanisms=["Semantic similarity to ambiguity corpus", "Embedding-based scoring"],
+        scanner_modules=[ScannerModule.QUALITY_LINT],
+        owasp_refs=[],
+        cwe_refs=[],
+    ),
+    RiskDefinition(
+        id="P-Q9",
+        title="Low Readability Score",
+        artifact_types=[ArtifactType.PROMPT],
+        category=RiskCategory.QUALITY,
+        severity_score=3,
+        severity_label=SeverityLabel.LOW,
+        priority=Priority.P4,
+        gate_action=GateAction.INFO,
+        description="Prompt text has a low readability score (Flesch-Kincaid), indicating overly complex sentence structure that may degrade LLM comprehension.",
+        examples=[
+            "Deeply nested clauses with 50+ word sentences",
+            "Technical jargon without definitions",
+        ],
+        mitigation=[
+            "Simplify sentence structure",
+            "Break long sentences into shorter directives",
+            "Define technical terms in a glossary section",
+        ],
+        detection_mechanisms=["Flesch-Kincaid readability score", "Sentence complexity analysis"],
         scanner_modules=[ScannerModule.QUALITY_LINT],
         owasp_refs=[],
         cwe_refs=[],

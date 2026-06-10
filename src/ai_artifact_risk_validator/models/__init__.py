@@ -1,6 +1,10 @@
 """Pydantic data models and enums for the AI Artifact Risk Validator."""
 
-from ai_artifact_risk_validator.models.config import SuppressionRule, ValidatorConfig
+from ai_artifact_risk_validator.models.config import (
+    SemanticConfig,
+    SuppressionRule,
+    ValidatorConfig,
+)
 from ai_artifact_risk_validator.models.enums import (
     ArtifactType,
     GateAction,
@@ -38,6 +42,7 @@ __all__ = [
     "ScanReport",
     "ScanSummary",
     "ScannerModule",
+    "SemanticConfig",
     "SeverityLabel",
     "SuppressionRule",
     "ValidatorConfig",

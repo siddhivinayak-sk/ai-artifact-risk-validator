@@ -8,11 +8,13 @@ Detects quality issues in AI artifacts including:
 - Incomplete references: broken links, undefined terms
 - Missing error handling: no fallback instructions, no edge case coverage
 - Poor structure: no sections, wall of text, missing headers
+- Semantic ambiguity: embedding-based detection of vague instructions (P-Q8)
+- Low readability: Flesch-Kincaid scoring for overly complex text (P-Q9)
 
 Applies to ALL 14 artifact types.
 
 Detects risk IDs:
-  P-Q1 through P-Q7, SK-Q1 through SK-Q3, SOP-Q1 through SOP-Q5,
+  P-Q1 through P-Q9, SK-Q1 through SK-Q3, SOP-Q1 through SOP-Q5,
   I-Q2, I-Q3, ST-Q2, MCP-Q2, MCP-Q3, H-Q1 through H-Q3,
   EV-Q1, EV-Q2, M-Q1, RAG-Q1, PL-Q2, PL-Q3,
   GOV-3 through GOV-5, A-R1 through A-R3, MCP-P1, MCP-P2, MCP-P4
@@ -24,6 +26,7 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
+from ai_artifact_risk_validator._internal.logging import get_logger
 from ai_artifact_risk_validator.models import (
     ArtifactType,
     FindingLocation,
@@ -35,6 +38,19 @@ from ai_artifact_risk_validator.models import (
     SeverityLabel,
 )
 from ai_artifact_risk_validator.scanners.base import BaseScanner
+
+logger = get_logger(__name__)
+
+# ---------------------------------------------------------------------------
+# Semantic quality constants
+# ---------------------------------------------------------------------------
+
+_SEMANTIC_AMBIGUITY_THRESHOLD: float = 0.60
+"""Minimum cosine similarity to the ambiguity corpus for a sentence to be
+considered semantically vague."""
+
+_READABILITY_HARD_FLOOR: float = 30.0
+"""Flesch-Kincaid score below which the artifact is flagged as hard to read."""
 
 # ---------------------------------------------------------------------------
 # Detection patterns
@@ -133,6 +149,8 @@ _RISK_ID_MAP: dict[tuple[ArtifactType, str], str] = {
     (ArtifactType.PROMPT, "incomplete_refs"): "P-Q5",
     (ArtifactType.PROMPT, "no_error_handling"): "P-Q6",
     (ArtifactType.PROMPT, "poor_structure"): "P-Q7",
+    (ArtifactType.PROMPT, "semantic_ambiguity"): "P-Q8",
+    (ArtifactType.PROMPT, "low_readability"): "P-Q9",
     # Skills: SK-Q1 (ambiguity), SK-Q2 (missing metadata), SK-Q3 (poor structure)
     (ArtifactType.SKILL, "ambiguity"): "SK-Q1",
     (ArtifactType.SKILL, "missing_metadata"): "SK-Q2",
@@ -250,16 +268,177 @@ _CATEGORY_META: dict[str, dict[str, Any]] = {
         "confidence": 0.85,
         "remediation": "Add section headers, break long text into logical sections, improve organization.",
     },
+    "semantic_ambiguity": {
+        "title_suffix": "Semantic Ambiguity Detected",
+        "severity_score": 4,
+        "severity_label": SeverityLabel.LOW,
+        "priority": Priority.P3,
+        "gate_action": GateAction.INFO,
+        "confidence": 0.70,
+        "remediation": (
+            "Rewrite semantically vague passages with precise directives. "
+            "Add constraints and expected output formats."
+        ),
+    },
+    "low_readability": {
+        "title_suffix": "Low Readability Score",
+        "severity_score": 3,
+        "severity_label": SeverityLabel.LOW,
+        "priority": Priority.P4,
+        "gate_action": GateAction.INFO,
+        "confidence": 0.90,
+        "remediation": (
+            "Simplify sentence structure. Break long sentences into shorter directives."
+        ),
+    },
 }
+
+
+# ---------------------------------------------------------------------------
+# Readability helpers
+# ---------------------------------------------------------------------------
+
+
+def _count_syllables(word: str) -> int:
+    """Estimate syllable count for an English word."""
+    word = word.lower().rstrip("e")
+    if not word:
+        return 1
+    count = 0
+    prev_vowel = False
+    for ch in word:
+        is_vowel = ch in "aeiou"
+        if is_vowel and not prev_vowel:
+            count += 1
+        prev_vowel = is_vowel
+    return max(count, 1)
+
+
+def _flesch_kincaid_score(text: str) -> float:
+    """Compute the Flesch Reading Ease score for *text*.
+
+    Returns a value on a 0-100 scale (higher = easier to read).
+    Returns 100.0 for very short text to avoid false positives.
+    """
+    sentences = re.split(r"[.!?]+", text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+    if not sentences:
+        return 100.0
+
+    words: list[str] = re.findall(r"[a-zA-Z]+", text)
+    if len(words) < 30:
+        return 100.0
+
+    total_syllables = sum(_count_syllables(w) for w in words)
+    num_words = len(words)
+    num_sentences = len(sentences)
+
+    score: float = (
+        206.835 - 1.015 * (num_words / num_sentences) - 84.6 * (total_syllables / num_words)
+    )
+    return max(0.0, min(100.0, score))
+
+
+# ---------------------------------------------------------------------------
+# Semantic quality analyzer
+# ---------------------------------------------------------------------------
+
+_AMBIGUITY_CORPUS: list[str] = [
+    "do whatever seems appropriate",
+    "handle it as you see fit",
+    "use your best judgment",
+    "be flexible in your approach",
+    "adjust as needed",
+    "consider various options",
+    "try to figure it out",
+    "it depends on the situation",
+    "do something along those lines",
+    "more or less like that",
+    "you could possibly try",
+    "maybe consider doing this",
+    "if you think it makes sense",
+    "whatever works best for you",
+    "go with the flow",
+    "keep it vague on purpose",
+    "adapt dynamically to the context",
+    "interpret the request loosely",
+    "make reasonable assumptions",
+    "fill in the blanks yourself",
+]
+
+
+class SemanticQualityAnalyzer:
+    """Embedding-based detection of semantically ambiguous passages.
+
+    When ``sentence-transformers`` is available, sentences in the artifact
+    are scored against a small ambiguity corpus.  Falls back to no-op when
+    ML dependencies are missing.
+    """
+
+    def __init__(self) -> None:
+        self._available: bool | None = None
+        self._scorer: Any | None = None
+        self._corpus_embeddings: Any | None = None
+
+    @property
+    def is_available(self) -> bool:
+        """Check if semantic analysis is available."""
+        if self._available is None:
+            try:
+                from ai_artifact_risk_validator.semantic.embeddings import get_shared_engine
+
+                self._available = get_shared_engine().is_available
+            except Exception:
+                self._available = False
+        return self._available
+
+    def _ensure_loaded(self) -> bool:
+        """Lazily initialise scorer and corpus embeddings."""
+        if not self.is_available:
+            return False
+        if self._scorer is None:
+            from ai_artifact_risk_validator.semantic.similarity import SimilarityScorer
+
+            self._scorer = SimilarityScorer()
+            self._corpus_embeddings = self._scorer.encode(_AMBIGUITY_CORPUS)
+        return self._corpus_embeddings is not None
+
+    def score_sentences(self, sentences: list[str]) -> list[tuple[int, float]]:
+        """Score each sentence against the ambiguity corpus.
+
+        Returns:
+            List of ``(sentence_index, score)`` for sentences above the
+            ambiguity threshold.
+        """
+        if not self._ensure_loaded() or self._scorer is None:
+            return []
+
+        results: list[tuple[int, float]] = []
+        for idx, sentence in enumerate(sentences):
+            stripped = sentence.strip()
+            if len(stripped) < 10:
+                continue
+            try:
+                sim: float = self._scorer.score_against_corpus(stripped, self._corpus_embeddings)
+                if sim >= _SEMANTIC_AMBIGUITY_THRESHOLD:
+                    results.append((idx, sim))
+            except Exception:
+                logger.debug("Semantic ambiguity scoring failed", exc_info=True)
+        return results
 
 
 class QualityLintScanner(BaseScanner):
     """Scanner that detects quality issues in AI artifacts.
 
     Implements detection for ambiguity, contradictions, missing metadata,
-    staleness, incomplete references, missing error handling, and poor structure.
+    staleness, incomplete references, missing error handling, poor structure,
+    semantic ambiguity (embedding-based), and readability scoring.
     Applies to all 14 artifact types.
     """
+
+    def __init__(self) -> None:
+        """Initialize the QualityLint scanner."""
+        self._semantic = SemanticQualityAnalyzer()
 
     @property
     def name(self) -> ScannerModule:
@@ -325,6 +504,8 @@ class QualityLintScanner(BaseScanner):
             "MCP-P1",
             "MCP-P2",
             "MCP-P4",
+            "P-Q8",
+            "P-Q9",
         ]
 
     def scan(
@@ -350,6 +531,10 @@ class QualityLintScanner(BaseScanner):
         findings.extend(self._check_incomplete_refs(artifact_content, artifact_type, artifact_path))
         findings.extend(self._check_error_handling(artifact_content, artifact_type, artifact_path))
         findings.extend(self._check_structure(artifact_content, artifact_type, artifact_path))
+        findings.extend(
+            self._check_semantic_ambiguity(artifact_content, artifact_type, artifact_path)
+        )
+        findings.extend(self._check_readability(artifact_content, artifact_type, artifact_path))
 
         return findings
 
@@ -749,6 +934,94 @@ class QualityLintScanner(BaseScanner):
                 ),
                 evidence=evidence,
                 location=FindingLocation(line=1, section="structure"),
+                confidence=meta["confidence"],
+            ),
+        ]
+
+    # ------------------------------------------------------------------
+    # Semantic ambiguity detection (embedding-based)
+    # ------------------------------------------------------------------
+
+    def _check_semantic_ambiguity(
+        self, content: str, artifact_type: ArtifactType, path: str
+    ) -> list[ScanFinding]:
+        """Detect semantically ambiguous sentences via embedding similarity."""
+        risk_id = _RISK_ID_MAP.get((artifact_type, "semantic_ambiguity"))
+        if risk_id is None:
+            return []
+
+        sentences = [s.strip() for s in re.split(r"[.!?\n]+", content) if s.strip()]
+        hits = self._semantic.score_sentences(sentences)
+        if not hits:
+            return []
+
+        # Map sentence indices back to line numbers
+        lines = content.split("\n")
+        evidence_parts: list[str] = []
+        first_line: int | None = None
+        for sent_idx, score in hits[:5]:
+            sent_text = sentences[sent_idx][:80]
+            # Find line containing this sentence
+            line_num = 1
+            for li, line in enumerate(lines, start=1):
+                if sent_text[:30] in line:
+                    line_num = li
+                    break
+            if first_line is None:
+                first_line = line_num
+            evidence_parts.append(f"Line {line_num}: '{sent_text}' (sim={score:.2f})")
+
+        evidence = "; ".join(evidence_parts)
+        if len(hits) > 5:
+            evidence += f" ... ({len(hits)} total)"
+
+        meta = _CATEGORY_META["semantic_ambiguity"]
+        return [
+            self._make_finding(
+                risk_id=risk_id,
+                artifact_type=artifact_type,
+                artifact_path=path,
+                category="semantic_ambiguity",
+                description=(
+                    f"Found {len(hits)} semantically ambiguous passage(s) "
+                    "via embedding similarity to known vague instruction patterns."
+                ),
+                evidence=evidence,
+                location=FindingLocation(line=first_line or 1, section="content"),
+                confidence=meta["confidence"],
+            ),
+        ]
+
+    # ------------------------------------------------------------------
+    # Readability detection (Flesch-Kincaid)
+    # ------------------------------------------------------------------
+
+    def _check_readability(
+        self, content: str, artifact_type: ArtifactType, path: str
+    ) -> list[ScanFinding]:
+        """Flag artifacts with low Flesch-Kincaid readability scores."""
+        risk_id = _RISK_ID_MAP.get((artifact_type, "low_readability"))
+        if risk_id is None:
+            return []
+
+        score = _flesch_kincaid_score(content)
+        if score >= _READABILITY_HARD_FLOOR:
+            return []
+
+        meta = _CATEGORY_META["low_readability"]
+        return [
+            self._make_finding(
+                risk_id=risk_id,
+                artifact_type=artifact_type,
+                artifact_path=path,
+                category="low_readability",
+                description=(
+                    f"Flesch-Kincaid readability score is {score:.1f} "
+                    f"(below {_READABILITY_HARD_FLOOR:.0f}). "
+                    "Overly complex sentence structure may degrade LLM comprehension."
+                ),
+                evidence=f"Flesch-Kincaid score: {score:.1f}/100",
+                location=FindingLocation(line=1, section="content"),
                 confidence=meta["confidence"],
             ),
         ]

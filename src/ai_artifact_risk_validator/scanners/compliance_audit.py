@@ -361,6 +361,109 @@ _RISK_METADATA: dict[str, dict[str, Any]] = {
 }
 
 
+# ============================================================
+# Regulatory Framework Registry
+# ============================================================
+
+
+class RegulatoryFramework:
+    """Describes a regulatory framework with its required compliance elements."""
+
+    __slots__ = ("abbreviation", "jurisdictions", "name", "required_elements")
+
+    def __init__(
+        self,
+        name: str,
+        abbreviation: str,
+        required_elements: list[str],
+        jurisdictions: list[str],
+    ) -> None:
+        self.name = name
+        self.abbreviation = abbreviation
+        self.required_elements = required_elements
+        self.jurisdictions = jurisdictions
+
+
+class RegulatoryRegistry:
+    """Registry of known regulatory frameworks and their requirements.
+
+    Provides lookup by abbreviation and lists the compliance elements
+    that scanners should check for.
+    """
+
+    _FRAMEWORKS: list[RegulatoryFramework] = [
+        RegulatoryFramework(
+            name="EU Artificial Intelligence Act",
+            abbreviation="EU_AI_ACT",
+            required_elements=[
+                "risk classification",
+                "human oversight mechanism",
+                "transparency notice",
+                "data governance",
+                "technical documentation",
+            ],
+            jurisdictions=["EU", "EEA"],
+        ),
+        RegulatoryFramework(
+            name="NIST AI Risk Management Framework",
+            abbreviation="NIST_AI_RMF",
+            required_elements=[
+                "risk identification",
+                "impact assessment",
+                "bias testing",
+                "performance monitoring",
+            ],
+            jurisdictions=["US"],
+        ),
+        RegulatoryFramework(
+            name="ISO/IEC 42001 AI Management System",
+            abbreviation="ISO_42001",
+            required_elements=[
+                "AI policy",
+                "risk assessment",
+                "AI impact assessment",
+                "data quality management",
+            ],
+            jurisdictions=["International"],
+        ),
+        RegulatoryFramework(
+            name="US State AI Laws",
+            abbreviation="US_STATE_AI",
+            required_elements=[
+                "automated decision disclosure",
+                "opt-out mechanism",
+                "impact assessment",
+            ],
+            jurisdictions=["US-CO", "US-CT", "US-IL"],
+        ),
+    ]
+
+    @classmethod
+    def all_frameworks(cls) -> list[RegulatoryFramework]:
+        """Return all registered frameworks."""
+        return list(cls._FRAMEWORKS)
+
+    @classmethod
+    def get(cls, abbreviation: str) -> RegulatoryFramework | None:
+        """Look up a framework by abbreviation."""
+        for fw in cls._FRAMEWORKS:
+            if fw.abbreviation == abbreviation:
+                return fw
+        return None
+
+    @classmethod
+    def all_required_elements(cls) -> list[str]:
+        """Return the union of all required elements across frameworks."""
+        seen: set[str] = set()
+        result: list[str] = []
+        for fw in cls._FRAMEWORKS:
+            for elem in fw.required_elements:
+                if elem not in seen:
+                    seen.add(elem)
+                    result.append(elem)
+        return result
+
+
 class ComplianceAuditScanner(BaseScanner):
     """Scanner for detecting regulatory compliance risks in AI artifacts.
 
@@ -468,6 +571,11 @@ class ComplianceAuditScanner(BaseScanner):
                     artifact_content, artifact_type, artifact_path
                 )
             )
+
+        # Semantic compliance gap detection (requires sentence-transformers)
+        findings.extend(
+            self._detect_semantic_compliance_gaps(artifact_content, artifact_type, artifact_path)
+        )
 
         return findings
 
@@ -803,5 +911,71 @@ class ComplianceAuditScanner(BaseScanner):
                 line=line,
             )
         )
+
+        return findings
+
+    # -- Semantic compliance gap detection --
+
+    _COMPLIANCE_GAP_CORPUS: list[str] = [
+        "processes personal data without explicit user consent",
+        "automated decision making affecting individuals",
+        "high-risk AI system without human oversight",
+        "transfers personal data across international borders",
+        "collects biometric data for identification",
+        "uses profiling to make decisions about individuals",
+        "processes health records without safeguards",
+        "deploys AI in hiring or employment decisions",
+    ]
+    _SEMANTIC_COMPLIANCE_THRESHOLD = 0.55
+
+    def _detect_semantic_compliance_gaps(
+        self,
+        content: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Use semantic similarity to detect compliance gaps not caught by regex.
+
+        Compares the artifact text against a corpus of known compliance-risk
+        sentences.  If any similarity exceeds the threshold **and** no
+        regulatory framework reference is present in the content, a REG-5
+        finding is emitted.
+        """
+        findings: list[ScanFinding] = []
+
+        # Skip if a regulatory framework is already referenced
+        if _REGULATORY_FRAMEWORK_PATTERN.search(content):
+            return findings
+
+        try:
+            from ai_artifact_risk_validator.semantic.similarity import SimilarityScorer
+
+            scorer = SimilarityScorer()
+            if not scorer.is_available:
+                return findings
+        except Exception:
+            return findings
+
+        corpus_embeddings = scorer.encode(self._COMPLIANCE_GAP_CORPUS)
+
+        # Check the first ~2000 chars (avoid encoding huge documents)
+        snippet = content[:2000]
+        max_score = scorer.score_against_corpus(snippet, corpus_embeddings)
+
+        if max_score >= self._SEMANTIC_COMPLIANCE_THRESHOLD:
+            findings.append(
+                self._create_finding(
+                    risk_id="REG-5",
+                    artifact_type=artifact_type,
+                    artifact_path=artifact_path,
+                    evidence=(
+                        f"Semantic analysis detected a compliance gap "
+                        f"(similarity={max_score:.2f}): content resembles "
+                        f"regulated activity without framework reference."
+                    ),
+                    confidence=min(max_score, 0.90),
+                    line=1,
+                )
+            )
 
         return findings

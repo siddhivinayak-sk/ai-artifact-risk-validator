@@ -26,6 +26,18 @@ class SuppressionRule(BaseModel):
     reason: str | None = None
 
 
+class SemanticConfig(BaseModel):
+    """Configuration for the semantic analysis engine.
+
+    Controls whether embedding-based analysis is enabled, which model to
+    use, and the similarity threshold for semantic matches.
+    """
+
+    enabled: bool = True
+    model_name: str = "all-MiniLM-L6-v2"
+    threshold: float = Field(default=0.55, ge=0.0, le=1.0)
+
+
 class ValidatorConfig(BaseModel):
     """Configuration for the Validator engine.
 
@@ -52,3 +64,4 @@ class ValidatorConfig(BaseModel):
     custom_artifact_patterns: dict[str, list[str]] = Field(default_factory=dict)
     html_report_path: str | None = None
     allow_dynamic_scan: bool = False
+    semantic: SemanticConfig = Field(default_factory=SemanticConfig)

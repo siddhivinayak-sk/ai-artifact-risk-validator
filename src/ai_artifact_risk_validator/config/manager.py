@@ -16,7 +16,11 @@ from typing import Any
 import yaml
 
 from ai_artifact_risk_validator._internal.logging import get_logger
-from ai_artifact_risk_validator.models.config import SuppressionRule, ValidatorConfig
+from ai_artifact_risk_validator.models.config import (
+    SemanticConfig,
+    SuppressionRule,
+    ValidatorConfig,
+)
 from ai_artifact_risk_validator.models.enums import GateAction, ScannerModule
 
 logger = get_logger(__name__)
@@ -54,6 +58,7 @@ _FLAT_SCHEMA_KEYS = {
     "token_budget_limit",
     "html_report_path",
     "allow_dynamic_scan",
+    "semantic",
 }
 
 # Keys that indicate nested (design doc) YAML format
@@ -179,6 +184,11 @@ def _flatten_nested_config(data: dict[str, Any]) -> dict[str, Any]:
         if isinstance(directories, list):
             flat["custom_plugin_dirs"] = [str(d) for d in directories]
 
+    # Semantic config: pass through as-is (nested dict)
+    semantic = data.get("semantic")
+    if isinstance(semantic, dict):
+        flat["semantic"] = semantic
+
     return flat
 
 
@@ -267,6 +277,14 @@ def _config_dict_to_validator_config(data: dict[str, Any]) -> dict[str, Any]:
                 k: v for k, v in patterns.items() if isinstance(v, list)
             }
 
+    # Semantic config (nested dict -> SemanticConfig Pydantic model)
+    if "semantic" in data:
+        sem = data["semantic"]
+        if isinstance(sem, dict):
+            kwargs["semantic"] = SemanticConfig(**sem)
+        elif isinstance(sem, SemanticConfig):
+            kwargs["semantic"] = sem
+
     return kwargs
 
 
@@ -289,6 +307,23 @@ def _parse_env_vars() -> dict[str, Any]:
                     env_var=env_key,
                     value=value,
                 )
+
+    # Handle AAV_SEMANTIC_ENABLED / AAV_SEMANTIC_THRESHOLD / AAV_SEMANTIC_MODEL
+    sem_overrides: dict[str, Any] = {}
+    sem_enabled = os.environ.get(f"{_ENV_PREFIX}SEMANTIC_ENABLED")
+    if sem_enabled is not None:
+        sem_overrides["enabled"] = sem_enabled.lower() in ("1", "true", "yes")
+    sem_model = os.environ.get(f"{_ENV_PREFIX}SEMANTIC_MODEL")
+    if sem_model is not None:
+        sem_overrides["model_name"] = sem_model
+    sem_threshold = os.environ.get(f"{_ENV_PREFIX}SEMANTIC_THRESHOLD")
+    if sem_threshold is not None:
+        try:
+            sem_overrides["threshold"] = float(sem_threshold)
+        except (ValueError, TypeError):
+            logger.warning("Invalid AAV_SEMANTIC_THRESHOLD value", value=sem_threshold)
+    if sem_overrides:
+        config_kwargs["semantic"] = SemanticConfig(**sem_overrides)
 
     # Handle AAV_DISABLED_SCANNERS (comma-separated list)
     disabled_scanners_env = os.environ.get(f"{_ENV_PREFIX}DISABLED_SCANNERS")
@@ -368,6 +403,20 @@ class ConfigManager:
         if cli_overrides:
             # Filter out None values from CLI overrides
             filtered_overrides = {k: v for k, v in cli_overrides.items() if v is not None}
+
+            # Merge nested 'semantic' dict instead of replacing
+            if "semantic" in filtered_overrides and "semantic" in config_kwargs:
+                existing = config_kwargs["semantic"]
+                incoming = filtered_overrides.pop("semantic")
+                if isinstance(existing, dict) and isinstance(incoming, dict):
+                    existing.update(incoming)
+                elif isinstance(existing, SemanticConfig) and isinstance(incoming, dict):
+                    merged = existing.model_dump()
+                    merged.update(incoming)
+                    config_kwargs["semantic"] = SemanticConfig(**merged)
+                else:
+                    config_kwargs["semantic"] = incoming
+
             config_kwargs.update(filtered_overrides)
 
         # Store config_path if explicitly provided

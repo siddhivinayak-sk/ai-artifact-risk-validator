@@ -75,6 +75,8 @@ class TestScannerProperties:
             "MCP-P1",
             "MCP-P2",
             "MCP-P4",
+            "P-Q8",
+            "P-Q9",
         }
         assert set(scanner.detected_risk_ids) == expected_ids
 

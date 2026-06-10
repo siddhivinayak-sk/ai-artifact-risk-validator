@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Semantic analysis engine** — Optional embedding-based detection using sentence-transformers (`semantic/` package) for paraphrased attack detection, semantic compliance gap analysis, and false positive reduction
+- `SemanticConfig` model with `enabled`, `model_name`, and `threshold` fields on `ValidatorConfig`
+- CLI flags: `--semantic/--no-semantic`, `--semantic-model`, `--semantic-threshold`
+- Environment variables: `AAV_SEMANTIC_ENABLED`, `AAV_SEMANTIC_MODEL`, `AAV_SEMANTIC_THRESHOLD`, `AI_VALIDATOR_SEMANTIC_ENABLED`
+- `EmbeddingEngine`, `SimilarityScorer`, `EmbeddingCache`, `CorpusManager`, `IntentClassifier` in `semantic/` package
+- Smart text chunker (`semantic/chunker.py`) and batch processor (`semantic/batch_processor.py`)
+- Cross-file composition analysis (`pipeline/cross_file_analyzer.py`) detecting contradictions and redundancies across artifacts
+- `RegulatoryFramework` and `RegulatoryRegistry` classes for EU AI Act, NIST AI RMF, ISO/IEC 42001, US State AI Laws
+- `semantic_score` field on `ScanFinding` for embedding-based confidence signals
+- Semantic-aware confidence calibration in `Aggregator` (70/30 blend of original confidence and semantic score)
+- Semantic corroboration in gate decision engine (high semantic score prevents low-confidence downgrade)
+- Context-aware entropy false-positive filtering in SecretScan (UUID, data-URI, integrity hash, placeholder patterns)
+- Hybrid detection in InjectionDet, QualityLint, BiasDetector, ComplianceAudit, and Dynamic MCP scanners
+- Risk definitions: P-Q8, P-Q9 (semantic quality), CMP-1, CMP-5 (cross-file composition)
+- Reference corpora: injection, jailbreak, bias, guardrail-weakening (JSON files in `semantic/corpora/`)
+- Semantic config section in `init` command template
+- 80+ new tests covering all semantic features
+
+### Changed
+
+- `ScanFinding` model now includes optional `semantic_score` field (defaults to `None`)
+- `Aggregator.aggregate()` applies confidence calibration before deduplication
+- Gate decision engine considers `semantic_score` in confidence downgrade logic
+- Config manager merges nested `semantic` dict from YAML, env vars, and CLI overrides
+
 ## [1.0.0] - 2025-06-10
 
 ### Added

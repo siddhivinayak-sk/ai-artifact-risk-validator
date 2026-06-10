@@ -109,6 +109,24 @@ def cli() -> None:
     default=False,
     help="Allow dynamic scanning of live MCP servers. Required in CI/CD mode.",
 )
+@click.option(
+    "--semantic/--no-semantic",
+    "semantic_enabled",
+    default=None,
+    help="Enable or disable semantic (embedding-based) analysis.",
+)
+@click.option(
+    "--semantic-model",
+    type=str,
+    default=None,
+    help="Sentence-transformer model name for semantic analysis.",
+)
+@click.option(
+    "--semantic-threshold",
+    type=click.FloatRange(0.0, 1.0),
+    default=None,
+    help="Minimum similarity score for semantic matches (0.0-1.0).",
+)
 def verify(
     path: str,
     output: str | None,
@@ -121,6 +139,9 @@ def verify(
     no_cache: bool,
     parallel: int | None,
     allow_dynamic_scan: bool,
+    semantic_enabled: bool | None,
+    semantic_model: str | None,
+    semantic_threshold: float | None,
 ) -> None:
     """Scan PATH for AI artifact risks and produce a validation report.
 
@@ -164,6 +185,22 @@ def verify(
 
     if allow_dynamic_scan:
         cli_overrides["allow_dynamic_scan"] = True
+
+    # Semantic CLI overrides
+    semantic_overrides: dict[str, object] = {}
+    if semantic_enabled is not None:
+        semantic_overrides["enabled"] = semantic_enabled
+    if semantic_model is not None:
+        semantic_overrides["model_name"] = semantic_model
+    if semantic_threshold is not None:
+        semantic_overrides["threshold"] = semantic_threshold
+    if semantic_overrides:
+        cli_overrides["semantic"] = semantic_overrides
+
+    # Also honour the AI_VALIDATOR_SEMANTIC_ENABLED env var
+    env_semantic = os.environ.get("AI_VALIDATOR_SEMANTIC_ENABLED")
+    if env_semantic is not None and "semantic" not in cli_overrides:
+        cli_overrides["semantic"] = {"enabled": env_semantic.lower() in ("1", "true", "yes")}
 
     # Load configuration using ConfigManager with proper precedence
     config_manager = ConfigManager()

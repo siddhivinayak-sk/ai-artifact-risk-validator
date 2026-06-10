@@ -172,6 +172,7 @@ class TestJsonFormatNonRegression:
             "remediation",
             "references",
             "false_positive",
+            "semantic_score",
             "timestamp",
         }
         assert expected_finding_keys == set(finding.keys())

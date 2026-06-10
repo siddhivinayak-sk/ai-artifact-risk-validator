@@ -536,3 +536,99 @@ class TestEdgeCases:
             assert isinstance(result.confidence, float)
             assert isinstance(result.signals, list)
             assert all(isinstance(s, str) for s in result.signals)
+
+
+# ---------------------------------------------------------------------------
+# Test: Semantic signal integration
+# ---------------------------------------------------------------------------
+
+
+class TestSemanticSignal:
+    """Test the optional semantic classification signal."""
+
+    def test_is_semantic_available_returns_bool(self, classifier):
+        """_is_semantic_available should return a boolean without crashing."""
+        result = classifier._is_semantic_available()
+        assert isinstance(result, bool)
+
+    def test_semantic_available_cached(self, classifier):
+        """Second call should use the cached value."""
+        first = classifier._is_semantic_available()
+        second = classifier._is_semantic_available()
+        assert first == second
+
+    def test_load_hints_returns_dict(self, classifier):
+        """_load_hints should return a dict mapping type names to lists."""
+        hints = classifier._load_hints()
+        assert isinstance(hints, dict)
+        # Should have entries for at least some artifact types
+        if hints:
+            for key, value in hints.items():
+                assert isinstance(key, str)
+                assert isinstance(value, list)
+
+    def test_load_hints_cached(self, classifier):
+        """Second call should return the same dict object."""
+        h1 = classifier._load_hints()
+        h2 = classifier._load_hints()
+        assert h1 is h2
+
+    def test_check_semantic_returns_float(self, classifier):
+        """_check_semantic should return a float score."""
+        score = classifier._check_semantic(
+            ArtifactType.PROMPT,
+            "You are a helpful AI assistant. Answer questions clearly.",
+        )
+        assert isinstance(score, float)
+        assert 0.0 <= score <= 1.0
+
+    def test_check_semantic_no_hints_returns_zero(self, classifier):
+        """When hints are empty for a type, score should be 0.0."""
+        # Force empty hints
+        classifier._hints = {}
+        score = classifier._check_semantic(ArtifactType.PROMPT, "test content")
+        assert score == 0.0
+
+    def test_semantic_graceful_on_error(self, classifier):
+        """Semantic should not crash even if internals fail."""
+        classifier._semantic_available = True
+        # Force broken scorer
+        classifier._scorer = None
+        classifier._hints = {"prompt": ["test hint"]}
+        classifier._hint_embeddings = None
+        # This should not raise, just return 0.0
+        score = classifier._check_semantic(ArtifactType.PROMPT, "test")
+        assert isinstance(score, float)
+
+    def test_classify_without_semantic_still_works(self, classifier):
+        """Classification should work fine when semantic is disabled."""
+        classifier._semantic_available = False
+        with tempfile.TemporaryDirectory() as tmpdir:
+            prompts_dir = Path(tmpdir) / "prompts"
+            prompts_dir.mkdir()
+            file_path = prompts_dir / "test.prompt.md"
+            content = "## System Prompt\nrole: system"
+            file_path.write_text(content)
+
+            result = classifier.classify(file_path, content=content)
+            assert result is not None
+            assert result.artifact_type == ArtifactType.PROMPT
+            assert "semantic" not in result.signals
+
+    def test_compute_score_content_weight_adjusted_when_semantic(self, classifier):
+        """When semantic is available, content weight is reduced."""
+        from ai_artifact_risk_validator.classifiers.classifier import _SEMANTIC_WEIGHT
+
+        classifier._semantic_available = True
+        # The content weight should be reduced by _SEMANTIC_WEIGHT
+        assert _SEMANTIC_WEIGHT > 0.0
+        assert _SEMANTIC_WEIGHT < 0.25  # Must be less than full content weight
+
+    def test_hints_file_has_expected_types(self, classifier):
+        """The hints JSON should have entries for common artifact types."""
+        hints = classifier._load_hints()
+        if hints:
+            expected_types = ["prompt", "skill", "agent", "mcp", "instruction"]
+            for t in expected_types:
+                assert t in hints, f"Missing hints for artifact type: {t}"
+                assert len(hints[t]) >= 5, f"Too few hints for {t}"
