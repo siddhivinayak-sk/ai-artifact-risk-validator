@@ -110,6 +110,18 @@ def cli() -> None:
     help="Allow dynamic scanning of live MCP servers. Required in CI/CD mode.",
 )
 @click.option(
+    "--dynamic-connection-timeout",
+    type=click.IntRange(1, 60),
+    default=None,
+    help="Connection timeout in seconds for dynamic MCP scan (1-60, default 10).",
+)
+@click.option(
+    "--dynamic-server-timeout",
+    type=click.IntRange(5, 300),
+    default=None,
+    help="Per-server timeout in seconds for dynamic MCP scan (5-300, default 30).",
+)
+@click.option(
     "--semantic/--no-semantic",
     "semantic_enabled",
     default=None,
@@ -139,6 +151,8 @@ def verify(
     no_cache: bool,
     parallel: int | None,
     allow_dynamic_scan: bool,
+    dynamic_connection_timeout: int | None,
+    dynamic_server_timeout: int | None,
     semantic_enabled: bool | None,
     semantic_model: str | None,
     semantic_threshold: float | None,
@@ -186,6 +200,12 @@ def verify(
 
     if allow_dynamic_scan:
         cli_overrides["allow_dynamic_scan"] = True
+
+    if dynamic_connection_timeout is not None:
+        cli_overrides["dynamic_connection_timeout"] = dynamic_connection_timeout
+
+    if dynamic_server_timeout is not None:
+        cli_overrides["dynamic_server_timeout"] = dynamic_server_timeout
 
     # Semantic CLI overrides
     semantic_overrides: dict[str, object] = {}

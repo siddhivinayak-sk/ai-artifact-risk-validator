@@ -748,6 +748,14 @@ class SecretScanScanner(BaseScanner):
                     # patterns such as GitLab CI component references, not real emails
                     if result.entity_type == "EMAIL_ADDRESS" and "/" in evidence:
                         continue
+                    # Skip PHONE_NUMBER matches that are pure numeric constants without
+                    # phone-like formatting — e.g. 2147483647 (INT_MAX), version numbers,
+                    # or database IDs are not phone numbers.
+                    if (
+                        result.entity_type == "PHONE_NUMBER"
+                        and evidence.strip().lstrip("+-").isdigit()
+                    ):
+                        continue
                     risk_id = self._get_risk_id(artifact_type, is_pii=True)
 
                     # Presidio confidence mapped to our bands

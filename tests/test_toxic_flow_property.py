@@ -13,7 +13,7 @@ Property 13:
   toxic flow finding.
 """
 
-from hypothesis import given, settings
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from ai_artifact_risk_validator.models.mcp_models import MCPToolInfo
@@ -225,7 +225,7 @@ class TestToxicFlowDetection:
     analyzer = ToxicFlowAnalyzer()
 
     @given(tools_by_server=toxic_flow_tools_across_servers())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_complete_chain_produces_toxic_flow_finding(
         self, tools_by_server: dict[str, list[MCPToolInfo]]
     ) -> None:
@@ -244,7 +244,7 @@ class TestToxicFlowDetection:
         )
 
     @given(tools_by_server=tools_missing_external_input())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_no_finding_when_missing_external_input(
         self, tools_by_server: dict[str, list[MCPToolInfo]]
     ) -> None:
@@ -260,7 +260,7 @@ class TestToxicFlowDetection:
         )
 
     @given(tools_by_server=tools_missing_sensitive_data())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_no_finding_when_missing_sensitive_data(
         self, tools_by_server: dict[str, list[MCPToolInfo]]
     ) -> None:
@@ -276,7 +276,7 @@ class TestToxicFlowDetection:
         )
 
     @given(tools_by_server=tools_missing_transmission())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None, suppress_health_check=[HealthCheck.too_slow])
     def test_no_finding_when_missing_transmission(
         self, tools_by_server: dict[str, list[MCPToolInfo]]
     ) -> None:

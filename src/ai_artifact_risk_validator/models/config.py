@@ -64,4 +64,6 @@ class ValidatorConfig(BaseModel):
     custom_artifact_patterns: dict[str, list[str]] = Field(default_factory=dict)
     html_report_path: str | None = None
     allow_dynamic_scan: bool = False
+    dynamic_connection_timeout: int = Field(default=10, ge=1, le=60)
+    dynamic_server_timeout: int = Field(default=30, ge=5, le=300)
     semantic: SemanticConfig = Field(default_factory=SemanticConfig)

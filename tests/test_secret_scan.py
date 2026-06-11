@@ -422,3 +422,25 @@ class TestPresidioFalsePositiveFixes:
 
         presidio_findings = [f for f in findings if "presidio" in f.description]
         assert len(presidio_findings) == 0
+
+    def test_integer_constant_not_flagged_as_phone_number(self, scanner: SecretScanScanner) -> None:
+        """Pure numeric constants like INT_MAX must not be flagged as PHONE_NUMBER."""
+        from unittest.mock import MagicMock, patch
+
+        content = "MAX_INT_VALUE: 2147483647"
+        evidence_str = "2147483647"
+
+        phone_result = MagicMock()
+        phone_result.entity_type = "PHONE_NUMBER"
+        phone_result.start = content.index(evidence_str)
+        phone_result.end = phone_result.start + len(evidence_str)
+        phone_result.score = 0.75
+
+        mock_presidio = MagicMock()
+        mock_presidio.analyze.return_value = [phone_result]
+
+        with patch.object(scanner, "_load_presidio", return_value=mock_presidio):
+            findings = scanner.scan(content, ArtifactType.ORCHESTRATION, "config.yaml")
+
+        presidio_findings = [f for f in findings if "presidio" in f.description]
+        assert len(presidio_findings) == 0

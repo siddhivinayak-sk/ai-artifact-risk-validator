@@ -8,6 +8,7 @@ caches corpus embeddings on first use for fast repeated scoring.
 from __future__ import annotations
 
 import json
+import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -29,6 +30,40 @@ _CORPUS_FILES: dict[str, str] = {
     "bias": "bias_corpus.json",
     "guardrail_weakening": "guardrail_weakening_corpus.json",
 }
+
+# ---------------------------------------------------------------------------
+# Process-level corpus embedding cache
+# ---------------------------------------------------------------------------
+# Multiple CorpusManager instances (one per scanner) all share these dicts so
+# each corpus is encoded at most once per process rather than once per
+# scanner instance.  _cache_lock serialises concurrent first-time encodes.
+_proc_embedding_cache: dict[str, np.ndarray[tuple[Any, ...], np.dtype[Any]]] = {}
+_cache_lock = threading.Lock()
+
+
+def _get_shared_embeddings(
+    corpus_name: str, sentences: list[str]
+) -> np.ndarray[tuple[Any, ...], np.dtype[Any]]:
+    """Return process-level cached embeddings, computing them if needed.
+
+    Args:
+        corpus_name: Logical corpus key used for cache lookup.
+        sentences:   Sentences to encode on cache-miss.
+
+    Returns:
+        A numpy array of shape ``(N, dim)`` with L2-normalised embeddings.
+    """
+    # Fast path — already cached.
+    if corpus_name in _proc_embedding_cache:
+        return _proc_embedding_cache[corpus_name]
+
+    # Slow path — lock, re-check, encode, store.
+    with _cache_lock:
+        if corpus_name in _proc_embedding_cache:
+            return _proc_embedding_cache[corpus_name]
+        embeddings = get_shared_engine().encode(sentences)
+        _proc_embedding_cache[corpus_name] = embeddings
+        return embeddings
 
 
 class CorpusManager:
@@ -106,7 +141,10 @@ class CorpusManager:
     def get_corpus_embeddings(self, corpus_name: str) -> np.ndarray:
         """Get pre-computed embeddings for a named corpus.
 
-        Computes and caches embeddings on first call.
+        Uses the process-level shared cache so multiple scanners running in
+        parallel threads do not each encode the same corpus independently.
+        Falls back to the per-instance cache when the engine is unavailable
+        or when the shared cache is bypassed via a custom corpora_dir.
 
         Args:
             corpus_name: One of the known corpus names.
@@ -123,7 +161,15 @@ class CorpusManager:
             return self._embeddings[corpus_name]
 
         sentences = self.load_corpus(corpus_name)
-        embeddings = self._engine.encode(sentences)
+
+        # Only use the process-level shared cache when the default engine and
+        # corpora directory are in use (i.e. no test overrides applied).
+        if self._corpora_dir == _CORPORA_DIR and self._engine is get_shared_engine():
+            embeddings = _get_shared_embeddings(corpus_name, sentences)
+        else:
+            # Custom engine or corpora dir — compute locally.
+            embeddings = self._engine.encode(sentences)
+
         self._embeddings[corpus_name] = embeddings
         logger.info(
             "Computed corpus embeddings",

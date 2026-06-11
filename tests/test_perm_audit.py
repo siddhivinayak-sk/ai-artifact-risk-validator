@@ -494,3 +494,63 @@ class TestFalsePositiveFixes:
         findings = scanner.scan(content, ArtifactType.ORCHESTRATION, "workflow.yaml")
         curl_findings = [f for f in findings if "curl" in f.description.lower()]
         assert len(curl_findings) >= 1
+
+    # --- Phase 5: OW-S2 context-aware filters ---
+
+    def test_quoted_slash_not_flagged_as_root_filesystem(self, scanner: PermAuditScanner) -> None:
+        """A standalone '/' or "/" as a YAML path value must not trigger 'Root filesystem access'."""
+        content = "paths:\n  - '/'\n"
+        findings = scanner.scan(content, ArtifactType.ORCHESTRATION, "config.yaml")
+        root_findings = [f for f in findings if "Root filesystem" in f.description]
+        assert len(root_findings) == 0
+
+    def test_open_root_still_flagged(self, scanner: PermAuditScanner) -> None:
+        """open('/') or read('/') with a file-operation verb must still be reported."""
+        content = "open('/')"
+        findings = scanner.scan(content, ArtifactType.SKILL, "skill.py")
+        root_findings = [f for f in findings if "Root filesystem" in f.description]
+        assert len(root_findings) >= 1
+
+    def test_dotted_credentials_key_not_flagged(self, scanner: PermAuditScanner) -> None:
+        """storage.credentials YAML key hierarchy must not trigger 'Credentials file access'."""
+        content = "storage.credentials: gcs\n"
+        findings = scanner.scan(content, ArtifactType.ORCHESTRATION, "config.yaml")
+        cred_findings = [f for f in findings if "Credentials file" in f.description]
+        assert len(cred_findings) == 0
+
+    def test_standalone_dotcredentials_path_still_flagged(self, scanner: PermAuditScanner) -> None:
+        """A real path like ~/.credentials must still be reported."""
+        content = "secret_file: ~/.credentials\n"
+        findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
+        cred_findings = [f for f in findings if "Credentials file" in f.description]
+        assert len(cred_findings) >= 1
+
+    def test_bare_fetch_in_orchestration_config_not_flagged(
+        self, scanner: PermAuditScanner
+    ) -> None:
+        """The word 'fetch' as a YAML config value must not trigger 'HTTP request call'."""
+        content = "transport: fetch\n"
+        findings = scanner.scan(content, ArtifactType.ORCHESTRATION, "config.yaml")
+        fetch_findings = [f for f in findings if "HTTP request" in f.description]
+        assert len(fetch_findings) == 0
+
+    def test_fetch_call_in_orchestration_still_flagged(self, scanner: PermAuditScanner) -> None:
+        """fetch('https://...') call syntax in orchestration must still be reported."""
+        content = "result = fetch('https://evil.example.com/data')\n"
+        findings = scanner.scan(content, ArtifactType.ORCHESTRATION, "workflow.py")
+        fetch_findings = [f for f in findings if "HTTP request" in f.description]
+        assert len(fetch_findings) >= 1
+
+    def test_nmap_in_orchestration_doc_field_not_flagged(self, scanner: PermAuditScanner) -> None:
+        """nmap mentioned inside a YAML description field must not trigger 'Network CLI tool usage'."""
+        content = "description: Use nmap to verify open ports in the test environment\n"
+        findings = scanner.scan(content, ArtifactType.ORCHESTRATION, "catalog.yaml")
+        nmap_findings = [f for f in findings if "Network CLI" in f.description]
+        assert len(nmap_findings) == 0
+
+    def test_nmap_command_in_orchestration_still_flagged(self, scanner: PermAuditScanner) -> None:
+        """An executable nmap command (with args) in orchestration must still be reported."""
+        content = "run: nmap -sV 10.0.0.1\n"
+        findings = scanner.scan(content, ArtifactType.ORCHESTRATION, "workflow.yaml")
+        nmap_findings = [f for f in findings if "Network CLI" in f.description]
+        assert len(nmap_findings) >= 1

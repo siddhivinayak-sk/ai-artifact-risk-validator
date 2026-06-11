@@ -725,13 +725,37 @@ class PermAuditScanner(BaseScanner):
         for pattern_name, pattern, confidence in _SENSITIVE_FILE_PATTERNS:
             for line_num, line in enumerate(lines, start=1):
                 for match in pattern.finditer(line):
+                    evidence = match.group(0)
+                    # "Root filesystem access": a quoted slash '/' or "/" used as a
+                    # standalone YAML path value (route prefix, array item) is NOT
+                    # a dangerous open/read/write of the root filesystem.  Only flag
+                    # when a file-operation verb precedes it on the same line.
+                    if (
+                        pattern_name == "Root filesystem access"
+                        and evidence.strip("'\"") == "/"
+                        and not re.search(
+                            r"(?i)\b(?:open|read|write|access)\b",
+                            line[: match.start()],
+                        )
+                    ):
+                        continue
+                    # "Credentials file access": .credentials as part of a dotted
+                    # YAML key hierarchy (e.g. storage.credentials:) is not a file
+                    # path.  Skip when the dot is immediately preceded by a word char.
+                    if (
+                        pattern_name == "Credentials file access"
+                        and ".credentials" in evidence.lower()
+                        and match.start() > 0
+                        and line[match.start() - 1].isalnum()
+                    ):
+                        continue
                     risk_id = _FILE_ACCESS_RISK_MAP.get(artifact_type, "SK-S3")
                     findings.append(
                         self._create_finding(
                             risk_id=risk_id,
                             artifact_type=artifact_type,
                             artifact_path=artifact_path,
-                            evidence=match.group(0),
+                            evidence=evidence,
                             confidence=confidence,
                             line=line_num,
                             pattern_name=pattern_name,
@@ -773,6 +797,30 @@ class PermAuditScanner(BaseScanner):
                 continue
             for line_num, line in enumerate(lines, start=1):
                 for match in pattern.finditer(line):
+                    # In ORCHESTRATION YAML, a bare "fetch" (no call syntax or URL
+                    # argument on the same line) is likely a tool/concept reference in
+                    # a config value or description, not an active HTTP fetch call.
+                    if (
+                        pattern_name == "HTTP request call"
+                        and artifact_type == ArtifactType.ORCHESTRATION
+                        and match.group(0).lower() == "fetch"
+                        and not re.search(r"(?i)\bfetch\s*\(|\bfetch\s+[\"']?https?://", line)
+                    ):
+                        continue
+                    # "Network CLI tool usage": skip when the pattern fires on a YAML
+                    # documentation field (description, note, example) in an
+                    # ORCHESTRATION artifact — the tool is mentioned as a reference,
+                    # not invoked as a command.
+                    if (
+                        pattern_name == "Network CLI tool usage"
+                        and artifact_type == ArtifactType.ORCHESTRATION
+                        and re.match(
+                            r"(?i)\s*(?:description|summary|note|example"
+                            r"|doc(?:umentation)?|comment)\s*[=:]",
+                            line,
+                        )
+                    ):
+                        continue
                     risk_id = _NETWORK_RISK_MAP.get(artifact_type, "A-S2")
                     findings.append(
                         self._create_finding(

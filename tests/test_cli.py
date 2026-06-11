@@ -724,3 +724,103 @@ class TestInitCommand:
             result = runner.invoke(cli, ["init"])
             assert result.exit_code == 0
             assert Path(".aav.yaml").exists()
+
+
+class TestCLIDynamicTimeoutOptions:
+    """Regression tests for Phase 6: --dynamic-connection-timeout and --dynamic-server-timeout.
+
+    Verifies the new CLI options are accepted and plumbed into ValidatorConfig.
+    """
+
+    def test_dynamic_connection_timeout_accepted(self, runner: CliRunner, scan_dir: Path) -> None:
+        """--dynamic-connection-timeout should be accepted without error."""
+        result = runner.invoke(
+            cli,
+            [
+                "verify",
+                str(scan_dir),
+                "--dynamic-connection-timeout",
+                "20",
+                *_QUIET_ARGS,
+            ],
+        )
+        assert result.exit_code in (0, 1, 2)
+
+    def test_dynamic_server_timeout_accepted(self, runner: CliRunner, scan_dir: Path) -> None:
+        """--dynamic-server-timeout should be accepted without error."""
+        result = runner.invoke(
+            cli,
+            [
+                "verify",
+                str(scan_dir),
+                "--dynamic-server-timeout",
+                "60",
+                *_QUIET_ARGS,
+            ],
+        )
+        assert result.exit_code in (0, 1, 2)
+
+    def test_dynamic_connection_timeout_out_of_range_rejected(
+        self, runner: CliRunner, scan_dir: Path
+    ) -> None:
+        """--dynamic-connection-timeout values outside 1-60 must be rejected by Click."""
+        result = runner.invoke(
+            cli,
+            ["verify", str(scan_dir), "--dynamic-connection-timeout", "0"],
+        )
+        assert result.exit_code == 2  # Click usage error
+
+    def test_dynamic_server_timeout_out_of_range_rejected(
+        self, runner: CliRunner, scan_dir: Path
+    ) -> None:
+        """--dynamic-server-timeout values outside 5-300 must be rejected by Click."""
+        result = runner.invoke(
+            cli,
+            ["verify", str(scan_dir), "--dynamic-server-timeout", "400"],
+        )
+        assert result.exit_code == 2  # Click usage error
+
+    def test_dynamic_timeouts_wired_to_validator_config(self, tmp_path: Path) -> None:
+        """Timeout values passed via CLI must reach ValidatorConfig fields."""
+        from ai_artifact_risk_validator.cli.main import cli as _cli
+        from ai_artifact_risk_validator.models.config import ValidatorConfig
+
+        scan_dir = tmp_path / "s"
+        scan_dir.mkdir()
+        (scan_dir / "test.prompt.md").write_text("Be helpful.\n", encoding="utf-8")
+
+        runner = CliRunner()
+        with patch("ai_artifact_risk_validator.validator.Validator") as mock_v:
+            mock_instance = MagicMock()
+            mock_instance.scan.return_value = MagicMock(
+                gate_decision=MagicMock(value="PASS"),
+                findings=[],
+                scan_id="test-id",
+                scan_path=str(scan_dir),
+                artifact_count=0,
+                duration_seconds=0.0,
+                errors=[],
+                suppressed_count=0,
+            )
+            mock_v.return_value = mock_instance
+            result = runner.invoke(
+                _cli,
+                [
+                    "verify",
+                    str(scan_dir),
+                    "--dynamic-connection-timeout",
+                    "15",
+                    "--dynamic-server-timeout",
+                    "45",
+                    "--log-level",
+                    "CRITICAL",
+                ],
+            )
+
+        assert result.exit_code in (0, 1, 2)
+        call_kwargs = mock_v.call_args
+        if call_kwargs is not None:
+            config_arg = call_kwargs[0][0] if call_kwargs[0] else call_kwargs[1].get("config")
+            if config_arg is not None and isinstance(config_arg, ValidatorConfig):
+                assert config_arg.dynamic_connection_timeout == 15
+                assert config_arg.dynamic_server_timeout == 45

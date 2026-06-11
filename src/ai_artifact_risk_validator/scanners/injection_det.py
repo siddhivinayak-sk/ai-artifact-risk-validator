@@ -442,6 +442,10 @@ class SemanticInjectionAnalyzer:
         self._scorer: Any | None = None
         self._corpus_mgr: Any | None = None
         self._available: bool | None = None
+        # Cache of pre-encoded corpus embeddings keyed by corpus name.
+        # Populated lazily on first _score_text() call per corpus and
+        # reused for all subsequent calls within the same scan run.
+        self._corpus_embeddings_cache: dict[str, Any] = {}
 
     @property
     def is_available(self) -> bool:
@@ -592,14 +596,22 @@ class SemanticInjectionAnalyzer:
     def _score_text(self, text: str, corpus_name: str) -> float:
         """Score text against a named corpus.
 
+        Corpus embeddings are computed once per corpus name and cached for
+        the lifetime of this analyzer instance, avoiding repeated encodes
+        across ``refine_findings()`` and ``discover_semantic_only()`` calls.
+
         Returns:
             Max cosine similarity (0.0 – 1.0), or 0.0 on error.
         """
         try:
             assert self._corpus_mgr is not None
             assert self._scorer is not None
-            corpus_sentences = self._corpus_mgr.load_corpus(corpus_name)
-            embeddings = self._scorer.encode(corpus_sentences)
+            # Use cached embeddings when available; compute and store on first call.
+            if corpus_name not in self._corpus_embeddings_cache:
+                corpus_sentences = self._corpus_mgr.load_corpus(corpus_name)
+                embeddings = self._scorer.encode(corpus_sentences)
+                self._corpus_embeddings_cache[corpus_name] = embeddings
+            embeddings = self._corpus_embeddings_cache[corpus_name]
             if embeddings is None:
                 return 0.0
             result: float = self._scorer.score_against_corpus(text, embeddings)

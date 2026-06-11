@@ -216,6 +216,11 @@ ai-artifact-validator verify ./my-artifacts --format sarif --output report.sarif
 # Scan an mcp.json file with dynamic analysis (connects to live servers)
 ai-artifact-validator verify ./mcp.json --allow-dynamic-scan
 
+# Dynamic scan with custom timeouts (connection: 1-60 s, per-server: 5-300 s)
+ai-artifact-validator verify ./mcp.json --allow-dynamic-scan \
+  --dynamic-connection-timeout 20 \
+  --dynamic-server-timeout 60
+
 # Dynamic scan with verbose logging
 ai-artifact-validator verify ./mcp.json --allow-dynamic-scan --log-level debug
 
@@ -641,6 +646,8 @@ Configuration is merged with the following precedence (highest to lowest):
 | `AAV_HTML_REPORT_PATH` | Write an HTML report to this path as a side effect (in addition to primary output) | `/tmp/report.html` || `AAV_SEMANTIC_ENABLED` | Enable/disable semantic analysis | `true` / `false` |
 | `AAV_SEMANTIC_MODEL` | Sentence-transformer model name | `all-MiniLM-L6-v2` |
 | `AAV_SEMANTIC_THRESHOLD` | Similarity threshold for semantic matches | `0.55` |
+| `AAV_DYNAMIC_CONNECTION_TIMEOUT` | Connection timeout in seconds for dynamic MCP scan (1-60) | `20` |
+| `AAV_DYNAMIC_SERVER_TIMEOUT` | Per-server timeout in seconds for dynamic MCP scan (5-300) | `60` |
 | `AI_VALIDATOR_SEMANTIC_ENABLED` | Alternative env var for semantic toggle | `1` / `true` / `yes` |
 | `HF_TOKEN` | Hugging Face API token for authenticated model downloads (higher rate limits) | `hf_abc123...` |
 | `HF_HUB_DISABLE_PROGRESS_BARS` | Suppress Hugging Face download progress bars | `1` |
@@ -660,6 +667,12 @@ Configuration is merged with the following precedence (highest to lowest):
 > $env:HF_TOKEN = "hf_your_token_here"        # PowerShell
 > ```
 > The model is cached locally after the first download (`~/.cache/huggingface/`).
+>
+> **Single model load per process:** The embedding model is initialised at most once per
+> process, even when multiple scanner threads are running in parallel. Corpus embeddings
+> (injection, jailbreak, bias, guardrail-weakening) are also computed once per process
+> and shared across all scanner instances. You will therefore see exactly one
+> `"Loaded embedding model"` log entry per process regardless of how many files are scanned.
 
 ### Inline suppression
 

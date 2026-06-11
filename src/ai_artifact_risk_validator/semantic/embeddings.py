@@ -46,6 +46,9 @@ class EmbeddingEngine:
         self._model: Any = None
         self._cache_dir = cache_dir
         self._available: bool | None = None
+        # Per-instance lock prevents parallel scanner threads racing to
+        # load the model simultaneously (double-checked locking pattern).
+        self._model_load_lock = threading.Lock()
 
     @property
     def model_name(self) -> str:
@@ -74,12 +77,18 @@ class EmbeddingEngine:
     def _get_model(self) -> Any:
         """Lazily load the sentence-transformers model.
 
+        Thread-safe via double-checked locking: the fast path (model
+        already loaded) never acquires the lock, while first-time callers
+        from parallel scanner threads are serialised so the model is
+        initialised exactly once.
+
         Returns:
             A ``SentenceTransformer`` model instance.
 
         Raises:
             RuntimeError: If sentence-transformers is not installed.
         """
+        # Fast path — model already loaded, no lock needed.
         if self._model is not None:
             return self._model
 
@@ -90,13 +99,18 @@ class EmbeddingEngine:
             )
             raise RuntimeError(msg)
 
-        from sentence_transformers import SentenceTransformer
+        # Slow path — acquire lock and check again to avoid duplicate loads.
+        with self._model_load_lock:
+            if self._model is not None:
+                return self._model
 
-        self._model = SentenceTransformer(
-            self._model_name,
-            cache_folder=str(self._cache_dir) if self._cache_dir else None,
-        )
-        logger.info("Loaded embedding model", model_name=self._model_name)
+            from sentence_transformers import SentenceTransformer
+
+            self._model = SentenceTransformer(
+                self._model_name,
+                cache_folder=str(self._cache_dir) if self._cache_dir else None,
+            )
+            logger.info("Loaded embedding model", model_name=self._model_name)
         return self._model
 
     def encode(self, texts: list[str]) -> np.ndarray:

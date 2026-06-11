@@ -983,3 +983,64 @@ class TestSemanticInjectionAnalyzerWithMock:
         analyzer.refine_findings("line1\nline2", findings)
         assert findings[0].confidence == 0.95  # Boosted
         assert findings[1].confidence == 0.40  # Capped
+
+
+class TestSemanticInjectionAnalyzerCorpusCache:
+    """Regression tests for Phase 3: per-instance corpus embedding cache.
+
+    Verifies that _score_text() does not re-encode the corpus on every call.
+    """
+
+    def _make_analyzer(self):
+        from ai_artifact_risk_validator.scanners.injection_det import SemanticInjectionAnalyzer
+
+        analyzer = SemanticInjectionAnalyzer()
+        analyzer._available = True
+        mock_scorer = MagicMock()
+        mock_corpus_mgr = MagicMock()
+        mock_corpus_mgr.load_corpus.return_value = ["reference injection sentence"]
+        mock_scorer.encode.return_value = np.array([[0.5, 0.5]])
+        mock_scorer.score_against_corpus.return_value = 0.3
+        analyzer._scorer = mock_scorer
+        analyzer._corpus_mgr = mock_corpus_mgr
+        return analyzer, mock_scorer, mock_corpus_mgr
+
+    def test_corpus_embeddings_cache_attribute_exists(self) -> None:
+        """SemanticInjectionAnalyzer must have a _corpus_embeddings_cache dict."""
+        from ai_artifact_risk_validator.scanners.injection_det import SemanticInjectionAnalyzer
+
+        analyzer = SemanticInjectionAnalyzer()
+        assert hasattr(analyzer, "_corpus_embeddings_cache")
+        assert isinstance(analyzer._corpus_embeddings_cache, dict)
+
+    def test_encode_called_once_for_repeated_corpus_scores(self) -> None:
+        """encode() must be called exactly once per corpus across multiple _score_text calls."""
+        analyzer, mock_scorer, _ = self._make_analyzer()
+
+        analyzer._score_text("text one", "injection")
+        analyzer._score_text("text two", "injection")
+        analyzer._score_text("text three", "injection")
+
+        # encode() should have been called only ONCE (cache hit on 2nd and 3rd calls).
+        assert mock_scorer.encode.call_count == 1
+
+    def test_encode_called_per_distinct_corpus(self) -> None:
+        """encode() is called once per distinct corpus name (not once total)."""
+        analyzer, mock_scorer, mock_corpus_mgr = self._make_analyzer()
+        mock_corpus_mgr.load_corpus.return_value = ["sentence"]
+        mock_scorer.encode.return_value = np.array([[1.0, 0.0]])
+
+        analyzer._score_text("query", "injection")
+        analyzer._score_text("query", "jailbreak")
+        analyzer._score_text("query", "injection")  # cache hit
+
+        # Two distinct corpora → two encodes.
+        assert mock_scorer.encode.call_count == 2
+
+    def test_cache_populated_after_first_score(self) -> None:
+        """Cache dict is populated after the first _score_text call."""
+        analyzer, _, _ = self._make_analyzer()
+
+        assert "injection" not in analyzer._corpus_embeddings_cache
+        analyzer._score_text("any text", "injection")
+        assert "injection" in analyzer._corpus_embeddings_cache
