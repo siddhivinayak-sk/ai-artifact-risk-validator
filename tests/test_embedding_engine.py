@@ -217,6 +217,7 @@ class TestThreadSafeModelLoading:
     def test_get_model_concurrent_loads_only_once(self) -> None:
         """Concurrent callers must produce exactly one SentenceTransformer instantiation."""
         import threading
+        from types import ModuleType
 
         engine = EmbeddingEngine()
         engine._available = True
@@ -236,10 +237,14 @@ class TestThreadSafeModelLoading:
             except Exception as exc:
                 errors.append(exc)
 
-        # Patch SentenceTransformer on the already-loaded sentence_transformers
-        # module (rather than replacing sys.modules) to avoid cross-test
-        # contamination when the real module is cached from prior test runs.
-        with patch("sentence_transformers.SentenceTransformer", _CountingTransformer):
+        # Use a real ModuleType (not MagicMock) so Python's import machinery
+        # handles `from sentence_transformers import SentenceTransformer` correctly.
+        # patch.dict works whether sentence_transformers is installed or not:
+        # it adds the key if absent, or temporarily replaces it if present.
+        mock_st_module = ModuleType("sentence_transformers")
+        mock_st_module.SentenceTransformer = _CountingTransformer  # type: ignore[attr-defined]
+
+        with patch.dict("sys.modules", {"sentence_transformers": mock_st_module}):
             threads = [threading.Thread(target=worker) for _ in range(4)]
             for t in threads:
                 t.start()
