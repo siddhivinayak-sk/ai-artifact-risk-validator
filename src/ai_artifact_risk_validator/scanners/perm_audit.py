@@ -428,10 +428,11 @@ _DESTRUCTIVE_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
         re.compile(r"(?i)\brm\s+(?!-[a-z]*[rf])(?!--)(?:[^|;&\n]+)"),
         0.85,
     ),
-    # Format commands
+    # Format commands — require disk-operation context to avoid matching Python
+    # str.format(), logging format= arguments, or the word "format" in docstrings.
     (
         "Disk format command",
-        re.compile(r"(?i)\b(?:format|mkfs|fdisk)\b"),
+        re.compile(r"(?i)(?:format\s+[A-Za-z]:|format\s+/dev/|mkfs(?:\.\w+)?\s|\bfdisk\s)"),
         0.90,
     ),
     # Truncate/overwrite
@@ -762,6 +763,14 @@ class PermAuditScanner(BaseScanner):
         lines = content.splitlines()
 
         for pattern_name, pattern, confidence in _NETWORK_PATTERNS:
+            # "url: https://..." in orchestration/catalog YAML is metadata (documentation
+            # links, artifact references) — not an active outbound network call.
+            # Other patterns (curl/wget, fetch, socket, DNS) still apply.
+            if (
+                pattern_name == "External URL access"
+                and artifact_type == ArtifactType.ORCHESTRATION
+            ):
+                continue
             for line_num, line in enumerate(lines, start=1):
                 for match in pattern.finditer(line):
                     risk_id = _NETWORK_RISK_MAP.get(artifact_type, "A-S2")

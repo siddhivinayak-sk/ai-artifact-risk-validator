@@ -37,7 +37,7 @@ Key features:
 - **Semantic analysis** — Optional embedding-based detection using sentence-transformers for paraphrased attack detection, compliance gap analysis, and false positive reduction
 - **Multiple output formats** — JSON, rich terminal text, HTML, and SARIF v2.1.0 reports
 - **CI/CD integration** — exit codes map to gate decisions (0=PASS, 1=BLOCK, 2=WARN)
-- **False positive management** — inline suppression comments and config-based rules
+- **False positive management** — inline suppression comments, config-based rules, and built-in scanner-level filters (see below)
 
 ---
 
@@ -679,6 +679,20 @@ eval(user_input)  # Intentional for plugin system
 # aav-ignore: H-S2
 api_key: ${SECRET_KEY}  # Loaded from vault at runtime
 ```
+
+### Built-in scanner-level false-positive filters
+
+The following patterns are filtered automatically at the scanner level — no suppression
+comment or config entry is required:
+
+| Pattern | Scanner | Why it is filtered |
+|---|---|---|
+| Presidio `PERSON` entity (e.g. `Kafka`, `Helm`, `Docker`) | `SecretScan` | spaCy NER misidentifies tech product names as person names; a person name is not a credential |
+| Presidio `EMAIL_ADDRESS` containing `/` (e.g. `gitlab.example.com/group/project@v1.0`) | `SecretScan` | GitLab CI component references use `domain/path@version` syntax; these are not email addresses |
+| Presidio entity match shorter than 4 characters (e.g. `K6`) | `SecretScan` | Very short matches have an unacceptably high false-positive rate |
+| Python `format=`, `str.format()`, or the word `format` in docstrings/comments | `PermAudit` | Only disk format commands with explicit device context (`format C:`, `format /dev/sda`, `mkfs.ext4 /dev/…`, `fdisk /dev/…`) are flagged |
+| `url: https://…` in orchestration/catalog YAML | `PermAudit` | Metadata reference links are not active outbound network calls; `curl`/`wget`/`fetch`/socket patterns still apply |
+| Generic `.py` files classified as MCP artifacts | `Classifier` | MCP configs are `mcp.json` or `.ts` server files; standalone Python scripts adjacent to `mcp.json` should not inherit MCP artifact type |
 
 ---
 

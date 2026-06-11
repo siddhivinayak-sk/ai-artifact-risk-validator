@@ -632,3 +632,36 @@ class TestSemanticSignal:
             for t in expected_types:
                 assert t in hints, f"Missing hints for artifact type: {t}"
                 assert len(hints[t]) >= 5, f"Too few hints for {t}"
+
+
+class TestMCPPythonClassificationFix:
+    """Regression tests for Fix #6: .py files must not be classified as MCP
+    merely because an mcp.json exists in the same directory.
+    """
+
+    @pytest.fixture
+    def classifier(self):
+        from ai_artifact_risk_validator.classifiers.classifier import ArtifactClassifier
+
+        return ArtifactClassifier()
+
+    def test_py_script_adjacent_to_mcp_json_not_classified_as_mcp(
+        self, classifier, tmp_path
+    ) -> None:
+        """A generic Python utility next to mcp.json must not become an MCP artifact."""
+        # Simulate directory with mcp.json sibling
+        mcp_json = tmp_path / "mcp.json"
+        mcp_json.write_text('{"mcpServers": {}}')
+
+        utility_py = tmp_path / "utility.py"
+        # Plain Python content with no MCP-specific keywords
+        py_content = (
+            "import os\n\n\ndef list_files(path: str) -> list[str]:\n    return os.listdir(path)\n"
+        )
+        utility_py.write_text(py_content)
+
+        result = classifier.classify(utility_py, content=py_content)
+
+        assert result is None or result.artifact_type != ArtifactType.MCP, (
+            "A generic .py file adjacent to mcp.json must not be classified as MCP"
+        )

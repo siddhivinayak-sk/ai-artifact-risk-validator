@@ -730,6 +730,7 @@ class SecretScanScanner(BaseScanner):
                 "DATE_TIME",  # Timestamps are not PII
                 "NRP",  # Nationality/religious/political group — too noisy
                 "LOCATION",  # Location names are not credential leaks
+                "PERSON",  # Tech product names (Kafka, Helm, Docker) trigger spaCy NER; a person name is not a credential
             }
             try:
                 results = presidio.analyze(text=content, language="en")
@@ -740,6 +741,13 @@ class SecretScanScanner(BaseScanner):
                     offset = result.start
                     line_num = content[:offset].count("\n") + 1
                     evidence = content[result.start : result.end]
+                    # Skip very short matches — too noisy (e.g. "K6" → US_DRIVER_LICENSE)
+                    if len(evidence) < 4:
+                        continue
+                    # Skip EMAIL_ADDRESS matches that contain "/" — these are URL/path
+                    # patterns such as GitLab CI component references, not real emails
+                    if result.entity_type == "EMAIL_ADDRESS" and "/" in evidence:
+                        continue
                     risk_id = self._get_risk_id(artifact_type, is_pii=True)
 
                     # Presidio confidence mapped to our bands
