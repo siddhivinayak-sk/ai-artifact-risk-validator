@@ -37,6 +37,8 @@ _ENV_VAR_MAP: dict[str, tuple[str, type]] = {
     "CACHE_DIR": ("cache_dir", str),
     "MAX_FILE_SIZE": ("max_file_size_bytes", int),
     "HTML_REPORT_PATH": ("html_report_path", str),
+    "DYNAMIC_CONNECTION_TIMEOUT": ("dynamic_connection_timeout", int),
+    "DYNAMIC_SERVER_TIMEOUT": ("dynamic_server_timeout", int),
 }
 
 # Keys that belong to the flat config schema format
@@ -58,6 +60,8 @@ _FLAT_SCHEMA_KEYS = {
     "token_budget_limit",
     "html_report_path",
     "allow_dynamic_scan",
+    "dynamic_connection_timeout",
+    "dynamic_server_timeout",
     "semantic",
 }
 
@@ -218,6 +222,10 @@ def _config_dict_to_validator_config(data: dict[str, Any]) -> dict[str, Any]:
         kwargs["html_report_path"] = str(data["html_report_path"])
     if "allow_dynamic_scan" in data:
         kwargs["allow_dynamic_scan"] = bool(data["allow_dynamic_scan"])
+    if "dynamic_connection_timeout" in data:
+        kwargs["dynamic_connection_timeout"] = int(data["dynamic_connection_timeout"])
+    if "dynamic_server_timeout" in data:
+        kwargs["dynamic_server_timeout"] = int(data["dynamic_server_timeout"])
 
     # List fields
     if "file_include_patterns" in data:

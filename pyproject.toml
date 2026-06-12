@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ai-artifact-risk-validator"
-version = "0.6.0"
+version = "0.7.0"
 description = "Validates AI artifacts for security, performance, quality, compliance, and operational risks"
 readme = "README.md"
 license = "MIT"
@@ -219,6 +219,7 @@ ignore_missing_imports = true
 # --- Pytest Configuration ---
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
 addopts = "--strict-markers -v"

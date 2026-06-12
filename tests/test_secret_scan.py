@@ -353,3 +353,94 @@ You are a helpful assistant that helps users write code.
         content = "api_key = AKIAIOSFODNN7EXAMPLE"
         findings = scanner.scan(content, ArtifactType.PROMPT, "test.prompt.md")
         assert all(f.scanner_module == ScannerModule.SECRET_SCAN for f in findings)
+
+
+class TestPresidioFalsePositiveFixes:
+    """Regression tests for Presidio false-positive filters.
+
+    These tests verify that known noise sources (PERSON entities for tech names,
+    very short entities, and CI component-path references that look like emails)
+    do not produce findings.
+    """
+
+    def test_person_entity_not_flagged_as_secret(self, scanner: SecretScanScanner) -> None:
+        """PERSON entities (e.g. tech names Kafka, Helm) must not become secret findings."""
+        from unittest.mock import MagicMock, patch
+
+        person_result = MagicMock()
+        person_result.entity_type = "PERSON"
+        person_result.start = 0
+        person_result.end = 5
+        person_result.score = 0.85
+
+        mock_presidio = MagicMock()
+        mock_presidio.analyze.return_value = [person_result]
+
+        with patch.object(scanner, "_load_presidio", return_value=mock_presidio):
+            findings = scanner.scan("Kafka", ArtifactType.PROMPT, "test.prompt.md")
+
+        presidio_findings = [f for f in findings if "presidio" in f.description]
+        assert len(presidio_findings) == 0
+
+    def test_short_entity_not_flagged(self, scanner: SecretScanScanner) -> None:
+        """Presidio entities shorter than 4 characters must be filtered out."""
+        from unittest.mock import MagicMock, patch
+
+        short_result = MagicMock()
+        short_result.entity_type = "US_DRIVER_LICENSE"
+        short_result.start = 0
+        short_result.end = 2
+        short_result.score = 0.80
+
+        mock_presidio = MagicMock()
+        mock_presidio.analyze.return_value = [short_result]
+
+        with patch.object(scanner, "_load_presidio", return_value=mock_presidio):
+            findings = scanner.scan("K6", ArtifactType.PROMPT, "test.prompt.md")
+
+        presidio_findings = [f for f in findings if "presidio" in f.description]
+        assert len(presidio_findings) == 0
+
+    def test_ci_component_path_not_flagged_as_email(self, scanner: SecretScanScanner) -> None:
+        """EMAIL_ADDRESS matches containing '/' are CI/URL paths, not real emails."""
+        from unittest.mock import MagicMock, patch
+
+        content = "- component: 'gitlab.example.com/group/project@v1.0'"
+        evidence_str = "gitlab.example.com/group/project@v1.0"
+
+        email_result = MagicMock()
+        email_result.entity_type = "EMAIL_ADDRESS"
+        email_result.start = content.index(evidence_str)
+        email_result.end = email_result.start + len(evidence_str)
+        email_result.score = 0.90
+
+        mock_presidio = MagicMock()
+        mock_presidio.analyze.return_value = [email_result]
+
+        with patch.object(scanner, "_load_presidio", return_value=mock_presidio):
+            findings = scanner.scan(content, ArtifactType.ORCHESTRATION, "ci.yml")
+
+        presidio_findings = [f for f in findings if "presidio" in f.description]
+        assert len(presidio_findings) == 0
+
+    def test_integer_constant_not_flagged_as_phone_number(self, scanner: SecretScanScanner) -> None:
+        """Pure numeric constants like INT_MAX must not be flagged as PHONE_NUMBER."""
+        from unittest.mock import MagicMock, patch
+
+        content = "MAX_INT_VALUE: 2147483647"
+        evidence_str = "2147483647"
+
+        phone_result = MagicMock()
+        phone_result.entity_type = "PHONE_NUMBER"
+        phone_result.start = content.index(evidence_str)
+        phone_result.end = phone_result.start + len(evidence_str)
+        phone_result.score = 0.75
+
+        mock_presidio = MagicMock()
+        mock_presidio.analyze.return_value = [phone_result]
+
+        with patch.object(scanner, "_load_presidio", return_value=mock_presidio):
+            findings = scanner.scan(content, ArtifactType.ORCHESTRATION, "config.yaml")
+
+        presidio_findings = [f for f in findings if "presidio" in f.description]
+        assert len(presidio_findings) == 0

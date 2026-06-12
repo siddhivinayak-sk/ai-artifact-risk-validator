@@ -186,3 +186,73 @@ class TestEmbeddingEngineEncode:
         result = engine.encode([])
         assert result.shape == (0, 0)
         engine._model.encode.assert_not_called()
+
+
+class TestThreadSafeModelLoading:
+    """Regression tests for Phase 2: thread-safe EmbeddingEngine._get_model().
+
+    Verifies that concurrent calls to _get_model() load the SentenceTransformer
+    exactly once even when multiple threads race to initialize the engine.
+    """
+
+    def test_model_load_lock_attribute_exists(self) -> None:
+        """EmbeddingEngine instances expose a _model_load_lock after construction."""
+        engine = EmbeddingEngine()
+        assert hasattr(engine, "_model_load_lock")
+        import threading
+
+        assert isinstance(engine._model_load_lock, type(threading.Lock()))
+
+    def test_get_model_loads_once_when_already_set(self) -> None:
+        """Fast-path: _get_model returns immediately when _model is already set."""
+        engine = EmbeddingEngine()
+        engine._available = True
+        mock_model = MagicMock()
+        engine._model = mock_model
+
+        # Lock should NOT be acquired — fast path returns early.
+        result = engine._get_model()
+        assert result is mock_model
+
+    def test_get_model_concurrent_loads_only_once(self) -> None:
+        """Concurrent callers must produce exactly one SentenceTransformer instantiation."""
+        import threading
+        from types import ModuleType
+
+        engine = EmbeddingEngine()
+        engine._available = True
+        load_count = 0
+
+        class _CountingTransformer:
+            def __init__(self, *args: object, **kwargs: object) -> None:
+                nonlocal load_count
+                load_count += 1
+
+        results: list[object] = []
+        errors: list[Exception] = []
+
+        def worker() -> None:
+            try:
+                results.append(engine._get_model())
+            except Exception as exc:
+                errors.append(exc)
+
+        # Use a real ModuleType (not MagicMock) so Python's import machinery
+        # handles `from sentence_transformers import SentenceTransformer` correctly.
+        # patch.dict works whether sentence_transformers is installed or not:
+        # it adds the key if absent, or temporarily replaces it if present.
+        mock_st_module = ModuleType("sentence_transformers")
+        mock_st_module.SentenceTransformer = _CountingTransformer  # type: ignore[attr-defined]
+
+        with patch.dict("sys.modules", {"sentence_transformers": mock_st_module}):
+            threads = [threading.Thread(target=worker) for _ in range(4)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+        assert not errors, f"Thread errors: {errors}"
+        assert load_count == 1, f"Model loaded {load_count} times (expected 1)"
+        assert len(results) == 4  # All threads got a result
+        # All threads should have received the same object
+        assert all(r is results[0] for r in results)

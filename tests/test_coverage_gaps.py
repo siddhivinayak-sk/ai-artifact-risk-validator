@@ -646,19 +646,21 @@ class TestSecretScanOptionalDeps:
 
         scanner = SecretScanScanner()
 
-        # Mock presidio analyzer
+        # Mock presidio analyzer — use PHONE_NUMBER which is not in the skip set.
+        # PERSON entities are intentionally skipped (tech names like Kafka/Helm
+        # are misidentified as persons by spaCy NER).
         mock_result = MagicMock()
         mock_result.start = 0
-        mock_result.end = 10
+        mock_result.end = 12
         mock_result.score = 0.9
-        mock_result.entity_type = "PERSON"
+        mock_result.entity_type = "PHONE_NUMBER"
 
         mock_analyzer = MagicMock()
         mock_analyzer.analyze.return_value = [mock_result]
         scanner._presidio_loaded = True
         scanner._presidio = mock_analyzer
 
-        content = "John Smith is a user"
+        content = "555-867-5309 is a phone number"
         findings = scanner.scan(content, ArtifactType.PROMPT, "test.prompt.md")
         # Should include presidio-detected PII
         presidio_findings = [f for f in findings if "presidio" in f.description.lower()]
@@ -709,7 +711,7 @@ class TestPackageInit:
         """__version__ is accessible."""
         import ai_artifact_risk_validator
 
-        assert ai_artifact_risk_validator.__version__ == "0.6.0"
+        assert ai_artifact_risk_validator.__version__ == "0.7.0"
 
 
 # =============================================================================

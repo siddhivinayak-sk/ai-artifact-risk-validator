@@ -54,7 +54,9 @@ EXTENSION_PATTERNS: dict[ArtifactType, list[str]] = {
     ArtifactType.MCP: [
         ".json",
         ".ts",
-        ".py",
+        # .py is intentionally excluded: generic Python scripts adjacent to an
+        # mcp.json file should NOT be classified as MCP artifacts. MCP configs are
+        # JSON files; TypeScript is the canonical server implementation language.
     ],
     ArtifactType.HOOK: [
         ".yaml",

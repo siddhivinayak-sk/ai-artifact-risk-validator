@@ -224,6 +224,8 @@ class Validator:
             scanner._config = DynamicScanConfig(
                 allow_dynamic_scan=self._config.allow_dynamic_scan,
                 interactive=interactive,
+                connection_timeout=self._config.dynamic_connection_timeout,
+                per_server_timeout=self._config.dynamic_server_timeout,
             )
 
     def _error_report(
