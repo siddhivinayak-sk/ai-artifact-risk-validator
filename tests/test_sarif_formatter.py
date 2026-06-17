@@ -29,7 +29,7 @@ def _empty_report() -> ScanReport:
         artifact_path="src/test.py",
         artifact_type=ArtifactType.PROMPT,
         scan_timestamp=datetime(2025, 6, 5, 12, 0, 0, tzinfo=timezone.utc),
-        scanner_version="0.8.0",
+        scanner_version="0.8.1",
         findings=[],
         summary=ScanSummary(
             total_findings=0,
@@ -71,7 +71,7 @@ def _report_with_one_finding() -> ScanReport:
         artifact_path="src/prompts/main.txt",
         artifact_type=ArtifactType.PROMPT,
         scan_timestamp=datetime(2025, 6, 5, 12, 0, 0, tzinfo=timezone.utc),
-        scanner_version="0.8.0",
+        scanner_version="0.8.1",
         findings=[finding],
         summary=ScanSummary(
             total_findings=1,
