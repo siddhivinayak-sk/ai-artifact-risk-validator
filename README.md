@@ -12,6 +12,7 @@ A comprehensive Python package that validates AI artifacts for security, perform
 
 - [Overview](#overview)
 - [Installation](#installation)
+- [Docker](#docker)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
 - [API Reference](#api-reference)
@@ -111,6 +112,71 @@ pip install -e ".[dev,test,ml]"
 
 - Python 3.11 or 3.12
 - Core dependencies: pydantic, pyyaml, jsonschema, tiktoken, click, rich, structlog, numpy
+
+---
+
+## Docker
+
+### Pull the image
+
+```bash
+docker pull siddhivinayaksk/ai-artifact-risk-validator
+```
+
+### Run a scan
+
+```bash
+# Scan artifacts in the current directory
+docker run --rm -v "$(pwd)":/workspace siddhivinayaksk/ai-artifact-risk-validator verify .
+
+# Scan a specific subdirectory
+docker run --rm -v "$(pwd)":/workspace siddhivinayaksk/ai-artifact-risk-validator verify ./my-artifacts
+```
+
+### Environment variables
+
+```bash
+# Set log level and severity threshold
+docker run --rm \
+  -e AAV_LOG_LEVEL=DEBUG \
+  -e AAV_SEVERITY_THRESHOLD=5 \
+  -v "$(pwd)":/workspace \
+  siddhivinayaksk/ai-artifact-risk-validator verify .
+```
+
+### Custom configuration file
+
+```bash
+# Mount your .aav.yaml config alongside artifacts
+docker run --rm \
+  -v "$(pwd)":/workspace \
+  siddhivinayaksk/ai-artifact-risk-validator verify --config .aav.yaml .
+```
+
+### Other commands
+
+```bash
+# List all risk definitions
+docker run --rm siddhivinayaksk/ai-artifact-risk-validator list-risks
+
+# Filter risks by category
+docker run --rm siddhivinayaksk/ai-artifact-risk-validator list-risks --category Security
+
+# Output scan as JSON
+docker run --rm -v "$(pwd)":/workspace siddhivinayaksk/ai-artifact-risk-validator verify --format json .
+
+# Show help
+docker run --rm siddhivinayaksk/ai-artifact-risk-validator --help
+```
+
+### Image details
+
+- Base: `python:3.12-slim` (Debian)
+- Includes ALL optional scanner dependencies (ml, secrets, security, provenance, quality)
+- Pre-baked `all-MiniLM-L6-v2` model for semantic analysis (no runtime downloads)
+- Runs as non-root user `validator`
+- Working directory: `/workspace` — mount your artifacts here
+- Fully offline ML operation (HF_HUB_OFFLINE=1)
 
 ---
 

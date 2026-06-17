@@ -1,0 +1,33 @@
+# Version control
+.git
+.github
+
+# Python caches
+__pycache__
+*.pyc
+*.pyo
+
+# Environment files
+.env*
+
+# Test and coverage
+.coverage
+htmlcov
+.pytest_cache
+.hypothesis
+tests/
+
+# Type checking and linting caches
+.mypy_cache
+.ruff_cache
+
+# Documentation
+docs/
+
+# Build artifacts
+*.egg-info
+dist/
+build/
+
+# Kiro specs
+.kiro/
