@@ -174,6 +174,7 @@ docker run --rm siddhivinayaksk/ai-artifact-risk-validator --help
 - Base: `python:3.12-slim` (Debian)
 - Includes ALL optional scanner dependencies (ml, secrets, security, provenance, quality)
 - Pre-baked `all-MiniLM-L6-v2` model for semantic analysis (no runtime downloads)
+- Pre-baked `en_core_web_lg` spaCy model used by `presidio-analyzer` for NER-based PII detection (names, phone numbers, emails, etc.) in the SecretScan scanner
 - Runs as non-root user `validator`
 - Working directory: `/workspace` — mount your artifacts here
 - Fully offline ML operation (HF_HUB_OFFLINE=1)

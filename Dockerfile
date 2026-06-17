@@ -20,6 +20,9 @@ RUN pip install --no-cache-dir ".[all]"
 # Download the sentence-transformer model at build time for offline use
 RUN python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2', cache_folder='/opt/models')"
 
+# Download spaCy model required by presidio-analyzer for PII detection
+RUN python -m spacy download en_core_web_lg
+
 
 # Stage 2: Runtime — minimal image for running the validator
 FROM python:3.12-slim AS runtime
