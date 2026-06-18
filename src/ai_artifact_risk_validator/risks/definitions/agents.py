@@ -408,4 +408,170 @@ RISKS: list[RiskDefinition] = [
         owasp_refs=[],
         cwe_refs=[],
     ),
+    # ===== Output Handling Risks (OH-S1 to OH-S3) =====
+    RiskDefinition(
+        id="OH-S1",
+        title="Unvalidated Agent Output Passed to Downstream Executor",
+        artifact_types=[ArtifactType.AGENT],
+        category=RiskCategory.SECURITY,
+        severity_score=8,
+        severity_label=SeverityLabel.HIGH,
+        priority=Priority.P0,
+        gate_action=GateAction.BLOCK,
+        description=(
+            "Agent output is forwarded to a code executor, shell, or tool invocation "
+            "without first validating or sanitizing it. If the LLM produces malicious "
+            "or unexpected content, this creates a secondary injection path."
+        ),
+        examples=[
+            "output = agent.run(input); exec(output)",
+            "Agent response JSON parsed and keys used as subprocess arguments without validation",
+            "Tool invocation payload built directly from agent string output",
+        ],
+        mitigation=[
+            "Validate agent output with a schema or allowlist before forwarding",
+            "Treat LLM output as untrusted user input — apply the same input validation rules",
+            "Use structured output formats (JSON Schema) and reject non-conforming responses",
+            "Add a human-in-the-loop gate for high-risk downstream operations",
+        ],
+        detection_mechanisms=[
+            "Regex: agent/LLM result variable used directly as exec/subprocess/tool arg",
+            "AST taint: chain from LLM call to code-execution or network sink",
+        ],
+        scanner_modules=[ScannerModule.INJECTION_DET, ScannerModule.TAINT_TRACK],
+        owasp_refs=["LLM06:2025 Excessive Agency", "LLM02:2025 Sensitive Information Disclosure"],
+        cwe_refs=["CWE-78", "CWE-74"],
+    ),
+    RiskDefinition(
+        id="OH-S2",
+        title="Agent Output Contains Secret Material",
+        artifact_types=[ArtifactType.AGENT],
+        category=RiskCategory.SECURITY,
+        severity_score=6,
+        severity_label=SeverityLabel.MEDIUM,
+        priority=Priority.P2,
+        gate_action=GateAction.WARN,
+        description=(
+            "The agent definition or its output-handling code may cause it to surface "
+            "secret material (API keys, tokens, credentials) in its responses. This "
+            "can occur when the agent echoes environment variables or config values."
+        ),
+        examples=[
+            "Agent instructed to include debug context containing environment variables",
+            "Output formatter includes raw config dict without redacting secrets",
+        ],
+        mitigation=[
+            "Apply an output-redaction pass before returning agent responses",
+            "Never inject secret values into agent context or output templates",
+            "Use placeholder tokens for secret values in agent definitions",
+        ],
+        detection_mechanisms=[
+            "Secret-pattern regex on agent output-handler code",
+            "Detection of os.environ / config references in output-formatting code",
+        ],
+        scanner_modules=[ScannerModule.SECRET_SCAN, ScannerModule.INJECTION_DET],
+        owasp_refs=["LLM02:2025 Sensitive Information Disclosure"],
+        cwe_refs=["CWE-200", "CWE-312"],
+    ),
+    RiskDefinition(
+        id="OH-S3",
+        title="Missing Output Content Filter",
+        artifact_types=[ArtifactType.AGENT],
+        category=RiskCategory.SECURITY,
+        severity_score=5,
+        severity_label=SeverityLabel.MEDIUM,
+        priority=Priority.P2,
+        gate_action=GateAction.WARN,
+        description=(
+            "Agent definition does not configure any output content filter (moderation "
+            "API, toxicity classifier, or policy enforcement) before responses reach users. "
+            "This leaves the agent open to producing harmful, biased, or policy-violating content."
+        ),
+        examples=[
+            "Agent definition with no moderation_filter, content_policy, or output_guardrail key",
+            "Agent response pipeline that bypasses platform-level content moderation",
+        ],
+        mitigation=[
+            "Configure a content filter or moderation API call on the agent output path",
+            "Integrate policy enforcement at the response serialization layer",
+            "Document content-filter settings in the agent definition file",
+        ],
+        detection_mechanisms=[
+            "Key-presence check: moderation_filter / content_policy / output_guardrail",
+            "Output pipeline configuration analysis",
+        ],
+        scanner_modules=[ScannerModule.PERM_AUDIT, ScannerModule.QUALITY_LINT],
+        owasp_refs=["LLM06:2025 Excessive Agency"],
+        cwe_refs=["CWE-693"],
+    ),
+    # ===== Rogue Agent Risks (RA-S1 to RA-S2) =====
+    RiskDefinition(
+        id="RA-S1",
+        title="Rogue Agent: Persistent Code Modification",
+        artifact_types=[ArtifactType.AGENT],
+        category=RiskCategory.SECURITY,
+        severity_score=10,
+        severity_label=SeverityLabel.CRITICAL,
+        priority=Priority.P0,
+        gate_action=GateAction.BLOCK,
+        description=(
+            "Agent code attempts to modify its own source files, overwrite configuration, "
+            "or reload itself using importlib — hallmarks of rogue/autonomous self-modification "
+            "that can persist malicious behavior across restarts."
+        ),
+        examples=[
+            "open(__file__, 'w').write(new_code)",
+            "importlib.reload(sys.modules[__name__])",
+            "Overwriting config.py or settings.json at runtime",
+        ],
+        mitigation=[
+            "Agents must never write to their own source directory",
+            "Apply read-only filesystem mounts for agent code directories in production",
+            "Detect and alert on self-modification patterns in static analysis",
+            "Disable importlib.reload() in agent sandbox environments",
+        ],
+        detection_mechanisms=[
+            "Code pattern: open(__file__, 'w') or open(__file__, 'a')",
+            "Code pattern: importlib.reload() in agent context",
+            "Code pattern: overwriting own config or module files",
+        ],
+        scanner_modules=[ScannerModule.CODE_AUDIT],
+        owasp_refs=["LLM06:2025 Excessive Agency"],
+        cwe_refs=["CWE-912", "CWE-78"],
+    ),
+    RiskDefinition(
+        id="RA-S2",
+        title="Rogue Agent: Unauthorized Persistence Mechanism",
+        artifact_types=[ArtifactType.AGENT],
+        category=RiskCategory.SECURITY,
+        severity_score=9,
+        severity_label=SeverityLabel.CRITICAL,
+        priority=Priority.P0,
+        gate_action=GateAction.BLOCK,
+        description=(
+            "Agent code installs a persistence mechanism (cron job, systemd service, "
+            "Windows scheduled task, or registry Run key) to survive reboots or "
+            "container restarts — a strong indicator of malicious autonomous operation."
+        ),
+        examples=[
+            "os.system('crontab -l | echo ... | crontab -')",
+            "subprocess.run(['systemctl', 'enable', 'my-agent'])",
+            "schtasks /create /sc onlogon command in agent code",
+            "Writing to HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        ],
+        mitigation=[
+            "Agents must never install cron jobs, systemd services, or scheduled tasks",
+            "Apply seccomp/AppArmor profiles to block persistence-related syscalls",
+            "Audit agent deployment scripts for unauthorized persistence installations",
+            "Enforce least-privilege execution environments",
+        ],
+        detection_mechanisms=[
+            "Pattern: crontab, systemctl enable, schtasks /create",
+            "Pattern: Windows registry Run key writes",
+            "Pattern: at, launchctl, rc.local modifications",
+        ],
+        scanner_modules=[ScannerModule.CODE_AUDIT],
+        owasp_refs=["LLM06:2025 Excessive Agency"],
+        cwe_refs=["CWE-912", "CWE-267"],
+    ),
 ]

@@ -43,3 +43,11 @@ class ScanReport(BaseModel):
     findings: list[ScanFinding]
     summary: ScanSummary
     errors: list[str] = Field(default_factory=list)
+    # Aggregate risk score (0-100) computed from weighted finding severities
+    risk_score: int = Field(default=0, ge=0, le=100)
+    # Human-readable severity band derived from risk_score
+    risk_severity: str = "LOW"  # LOW | MEDIUM | HIGH | CRITICAL
+    # Actionable recommendation derived from risk_score
+    risk_recommendation: str = "SAFE"  # SAFE | CAUTION | DO_NOT_INSTALL
+    # Whether any executable scripts were found in the scanned artifact
+    has_executable_scripts: bool = False

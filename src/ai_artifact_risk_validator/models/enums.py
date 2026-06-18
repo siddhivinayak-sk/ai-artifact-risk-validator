@@ -87,3 +87,5 @@ class ScannerModule(str, Enum):
     COMPLIANCE_AUDIT = "ComplianceAudit"
     CODE_AUDIT = "CodeAudit"
     DYNAMIC_SCAN = "DynamicScan"
+    YARA_SCAN = "YaraScan"
+    TAINT_TRACK = "TaintTrack"

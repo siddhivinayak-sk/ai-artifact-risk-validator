@@ -677,7 +677,7 @@ class DepScanScanner(BaseScanner):
 
     @property
     def detected_risk_ids(self) -> list[str]:
-        return ["MCP-S4", "MCP-S11", "MCP-S12", "PL-S3", "PL-S8", "SK-S7"]
+        return ["MCP-S4", "MCP-S11", "MCP-S12", "PL-S3", "PL-S8", "SK-S7", "DEP-S1", "DEP-S2"]
 
     def is_available(self) -> bool:
         """Always available — works with regex-based parsing."""
@@ -1016,13 +1016,7 @@ class DepScanScanner(BaseScanner):
 
     def _get_typosquat_risk_id(self, artifact_type: ArtifactType) -> str:
         """Get the appropriate typosquatting risk ID for the artifact type."""
-        mapping = {
-            ArtifactType.MCP: "MCP-S12",
-            ArtifactType.PLUGIN: "PL-S8",
-            ArtifactType.SKILL: "SK-S7",
-            ArtifactType.HOOK: "MCP-S12",
-        }
-        return mapping.get(artifact_type, "MCP-S12")
+        return "DEP-S1"
 
     # ------------------------------------------------------------------
     # Helper

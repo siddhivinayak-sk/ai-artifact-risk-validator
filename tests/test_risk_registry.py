@@ -49,7 +49,7 @@ class TestRiskRegistryInit:
 
     def test_creates_registry_with_builtin_definitions(self):
         reg = RiskRegistry()
-        assert reg.total_count == 200
+        assert reg.total_count == 222
 
     def test_registry_is_importable_from_risks_package(self):
         from ai_artifact_risk_validator.risks import RiskRegistry as Imported
@@ -93,7 +93,7 @@ class TestRiskRegistryQuery:
     def test_query_no_filters_returns_all(self):
         reg = RiskRegistry()
         results = reg.query()
-        assert len(results) == 200
+        assert len(results) == 222
 
     def test_query_by_artifact_type(self):
         reg = RiskRegistry()
@@ -207,7 +207,7 @@ class TestRiskRegistryTotalCount:
 
     def test_total_count_is_200_initially(self):
         reg = RiskRegistry()
-        assert reg.total_count == 200
+        assert reg.total_count == 222
 
     def test_total_count_reflects_added_risks(self):
         reg = RiskRegistry()
@@ -245,7 +245,7 @@ class TestLoadAllRisks:
     def test_returns_all_200_risks(self):
         risks = load_all_risks()
         assert isinstance(risks, list)
-        assert len(risks) == 200
+        assert len(risks) == 222
 
     def test_returns_list_type(self):
         result = load_all_risks()

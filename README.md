@@ -4,7 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 
-A comprehensive Python package that validates AI artifacts for security, performance, quality, compliance, and operational risks before peer sharing. It implements a risk framework covering **198 risks** across **14 artifact types** and **14 scanner modules**, including dynamic runtime analysis of live MCP servers.
+A comprehensive Python package that validates AI artifacts for security, performance, quality, compliance, and operational risks before peer sharing. It implements a risk framework covering **198+ risks** across **14 artifact types** and **16 scanner modules**, including dynamic runtime analysis of live MCP servers.
 
 ---
 
@@ -28,8 +28,8 @@ The AI Artifact Risk Validator scans directories containing AI artifacts (prompt
 
 Key features:
 
-- **198 risk definitions** across 14 artifact types and 6 cross-cutting dimensions
-- **14 scanner modules** covering secrets, injection, permissions, tokens, schema, dependencies, quality, provenance, bias, composability, portability, compliance, code security, and dynamic MCP analysis
+- **198+ risk definitions** across 14 artifact types and 6 cross-cutting dimensions
+- **16 scanner modules** covering secrets, injection, permissions, tokens, schema, dependencies, quality, provenance, bias, composability, portability, compliance, code security, dynamic MCP analysis, YARA signatures, and AST-based taint tracking
 - **Dynamic MCP scanning** — connects to live MCP servers, discovers tools, and detects prompt injection, tool poisoning, tool shadowing, toxic flows, and path traversal vulnerabilities
 - **Multi-language static scanning** — Python (AST), TypeScript/JavaScript, Rust, Java/Kotlin, Go, Ruby, C#, PHP
 - **Plugin architecture** — extend with custom scanners via entry points or plugin directories
@@ -74,7 +74,7 @@ pip install ai-artifact-risk-validator[ml]
 # Secret detection (detect-secrets, presidio)
 pip install ai-artifact-risk-validator[secrets]
 
-# Security scanning (bandit, pip-audit, safety)
+# Security scanning (bandit, pip-audit, safety, yara-python)
 pip install ai-artifact-risk-validator[security]
 
 # Provenance checking (gitpython, cryptography)
@@ -82,6 +82,12 @@ pip install ai-artifact-risk-validator[provenance]
 
 # Quality analysis (nltk, networkx)
 pip install ai-artifact-risk-validator[quality]
+
+# Network-dependent scanning (OSV.dev lookups via requests)
+pip install ai-artifact-risk-validator[network]
+
+# LLM meta-analysis enrichment (requires OPENAI_API_KEY)
+pip install ai-artifact-risk-validator[llm]
 
 # All optional dependencies (CPU-only torch)
 pip install torch --index-url https://download.pytorch.org/whl/cpu
@@ -172,7 +178,7 @@ docker run --rm siddhivinayaksk/ai-artifact-risk-validator --help
 ### Image details
 
 - Base: `python:3.12-slim` (Debian)
-- Includes ALL optional scanner dependencies (ml, secrets, security, provenance, quality)
+- Includes ALL optional scanner dependencies (ml, secrets, security, provenance, quality, yara-python)
 - Pre-baked `all-MiniLM-L6-v2` model for semantic analysis (no runtime downloads)
 - Pre-baked `en_core_web_lg` spaCy model used by `presidio-analyzer` for NER-based PII detection (names, phone numbers, emails, etc.) in the SecretScan scanner
 - Runs as non-root user `validator`
@@ -704,20 +710,77 @@ Configuration is merged with the following precedence (highest to lowest):
 
 ### Environment variables
 
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `AAV_LOG_LEVEL` | Logging level | `DEBUG` |
-| `AAV_SEVERITY_THRESHOLD` | Minimum severity to report | `5` |
-| `AAV_PARALLEL_FILES` | Parallel file workers | `8` |
-| `AAV_CACHE_DIR` | Cache directory path | `.aav-cache` |
-| `AAV_HTML_REPORT_PATH` | Write an HTML report to this path as a side effect (in addition to primary output) | `/tmp/report.html` || `AAV_SEMANTIC_ENABLED` | Enable/disable semantic analysis | `true` / `false` |
-| `AAV_SEMANTIC_MODEL` | Sentence-transformer model name | `all-MiniLM-L6-v2` |
-| `AAV_SEMANTIC_THRESHOLD` | Similarity threshold for semantic matches | `0.55` |
-| `AAV_DYNAMIC_CONNECTION_TIMEOUT` | Connection timeout in seconds for dynamic MCP scan (1-60) | `20` |
-| `AAV_DYNAMIC_SERVER_TIMEOUT` | Per-server timeout in seconds for dynamic MCP scan (5-300) | `60` |
-| `AI_VALIDATOR_SEMANTIC_ENABLED` | Alternative env var for semantic toggle | `1` / `true` / `yes` |
-| `HF_TOKEN` | Hugging Face API token for authenticated model downloads (higher rate limits) | `hf_abc123...` |
-| `HF_HUB_DISABLE_PROGRESS_BARS` | Suppress Hugging Face download progress bars | `1` |
+All `AAV_` prefixed variables override their corresponding config file settings. Third-party library variables (OpenAI, Hugging Face) follow their standard conventions.
+
+#### Validator configuration (`AAV_` prefix)
+
+| Variable | Description | Type | Example |
+|----------|-------------|------|---------|
+| `AAV_LOG_LEVEL` | Logging verbosity | `DEBUG` / `INFO` / `WARNING` / `ERROR` / `CRITICAL` | `DEBUG` |
+| `AAV_SEVERITY_THRESHOLD` | Minimum severity score to include in report (1-10) | int | `5` |
+| `AAV_PARALLEL_FILES` | Number of parallel file processing workers (1-32) | int | `8` |
+| `AAV_PARALLEL_SCANNERS` | Number of parallel scanners per file (1-16) | int | `4` |
+| `AAV_CACHE_DIR` | Directory path for scan result caching | string | `.aav-cache` |
+| `AAV_MAX_FILE_SIZE` | Maximum file size in bytes to scan (files above are skipped) | int | `10485760` |
+| `AAV_HTML_REPORT_PATH` | Write an HTML report to this path as a side effect (in addition to primary output) | string | `./reports/scan.html` |
+| `AAV_DISABLED_SCANNERS` | Comma-separated list of scanner module names to disable | string | `BiasDetector,PortabilityChk` |
+| `AAV_DYNAMIC_CONNECTION_TIMEOUT` | Connection timeout in seconds for dynamic MCP scan (1-60) | int | `20` |
+| `AAV_DYNAMIC_SERVER_TIMEOUT` | Per-server timeout in seconds for dynamic MCP scan (5-300) | int | `60` |
+
+#### Semantic analysis
+
+| Variable | Description | Type | Example |
+|----------|-------------|------|---------|
+| `AAV_SEMANTIC_ENABLED` | Enable/disable embedding-based semantic analysis | bool | `true` / `false` |
+| `AAV_SEMANTIC_MODEL` | Sentence-transformer model name | string | `all-MiniLM-L6-v2` |
+| `AAV_SEMANTIC_THRESHOLD` | Minimum similarity score for semantic matches (0.0-1.0) | float | `0.55` |
+| `AI_VALIDATOR_SEMANTIC_ENABLED` | Alternative env var for semantic toggle (legacy) | bool | `1` / `true` / `yes` |
+
+#### LLM enrichment (OpenAI)
+
+| Variable | Description | Type | Example |
+|----------|-------------|------|---------|
+| `OPENAI_API_KEY` | OpenAI API key (required when `--allow-llm` is used) | string | `sk-proj-abc123...` |
+| `OPENAI_ORG_ID` | OpenAI organization ID (optional, for enterprise billing) | string | `org-xyz789` |
+| `OPENAI_BASE_URL` | Custom API base URL (for Azure OpenAI or self-hosted endpoints) | string | `https://my-co.openai.azure.com/` |
+
+#### Hugging Face (semantic model download)
+
+| Variable | Description | Type | Example |
+|----------|-------------|------|---------|
+| `HF_TOKEN` | Hugging Face API token for authenticated downloads (higher rate limits) | string | `hf_abc123...` |
+| `HF_HUB_OFFLINE` | Block all outbound requests to Hugging Face (requires pre-cached model) | `1` | `1` |
+| `HF_HUB_DISABLE_PROGRESS_BARS` | Suppress download progress bars in CI environments | `1` | `1` |
+| `SENTENCE_TRANSFORMERS_HOME` | Custom directory for cached embedding models | string | `/opt/models` |
+
+#### Python runtime (used in Docker image)
+
+| Variable | Description | Type | Example |
+|----------|-------------|------|---------|
+| `PYTHONDONTWRITEBYTECODE` | Skip `.pyc` bytecode file generation | `1` | `1` |
+| `PYTHONUNBUFFERED` | Flush stdout/stderr immediately (useful for Docker logs) | `1` | `1` |
+
+#### Example: CI/CD environment setup
+
+```bash
+# Minimal CI configuration (offline, fast)
+export AAV_LOG_LEVEL=WARNING
+export AAV_SEVERITY_THRESHOLD=5
+export AAV_PARALLEL_FILES=8
+
+# Enable OSV.dev vulnerability lookups
+export AAV_SEVERITY_THRESHOLD=3
+# (also requires --allow-network flag on the CLI)
+
+# Enable LLM enrichment in CI
+export OPENAI_API_KEY="${{ secrets.OPENAI_API_KEY }}"
+# (also requires --allow-llm flag on the CLI)
+
+# Fully offline with pre-cached model (Docker or air-gapped)
+export HF_HUB_OFFLINE=1
+export SENTENCE_TRANSFORMERS_HOME=/opt/models
+export AAV_SEMANTIC_ENABLED=true
+```
 
 > **Hugging Face model download:** The first run with semantic features enabled downloads the
 > `all-MiniLM-L6-v2` model (~80 MB) from Hugging Face Hub. You may see:
@@ -842,6 +905,11 @@ from ai_artifact_risk_validator.models import ValidatorConfig
 | `custom_plugin_dirs` | `list[str]` | `[]` | Directories for custom scanners |
 | `html_report_path` | `str \| None` | `None` | Path to write an HTML report as a side effect |
 | `allow_dynamic_scan` | `bool` | `False` | Enable live MCP server scanning |
+| `allow_network_requests` | `bool` | `False` | Enable network requests (OSV.dev vulnerability lookups for `DepScan`) |
+| `allow_remote_scan` | `bool` | `False` | Enable remote artifact scanning |
+| `allow_llm_analysis` | `bool` | `False` | Enable LLM-powered enrichment of HIGH/CRITICAL findings |
+| `llm_provider` | `str` | `"openai"` | LLM provider for meta-analysis (`"openai"`) |
+| `llm_model` | `str` | `"gpt-4o-mini"` | Model name for LLM meta-analysis |
 | `semantic` | `SemanticConfig` | *(see below)* | Semantic analysis configuration |
 
 ### `SemanticConfig` model
@@ -1028,16 +1096,16 @@ assert restored_report.summary.gate_decision == report.summary.gate_decision
 
 ## Scanner Modules
 
-The validator includes 13 scanner modules, each specializing in a category of risk detection:
+The validator includes **16 scanner modules**, each specializing in a category of risk detection:
 
 | Scanner | Description | Optional Dependencies |
 |---------|-------------|----------------------|
 | **SecretScan** | Detects API keys, tokens, PII via regex and entropy analysis | `detect-secrets`, `presidio-analyzer` |
-| **InjectionDet** | Identifies prompt injection and jailbreak patterns | `transformers`, `sentence-transformers` |
+| **InjectionDet** | Identifies prompt injection, jailbreak, and context-poisoning patterns | `transformers`, `sentence-transformers` |
 | **PermAudit** | Audits tool permissions, file access, and network patterns | — |
 | **TokenAnalyzer** | Token counting, budget analysis, redundancy detection | — (uses `tiktoken`) |
 | **SchemaValid** | YAML/JSON schema validation, OpenAPI checks | — |
-| **DepScan** | Dependency vulnerability scanning | `pip-audit`, `safety` |
+| **DepScan** | Dependency vulnerability and typosquatting scanning | `pip-audit`, `safety` |
 | **QualityLint** | Ambiguity, staleness, metadata, and quality checks | `nltk` |
 | **ProvenanceChk** | Provenance metadata and integrity verification | `gitpython`, `cryptography` |
 | **BiasDetector** | Gendered language, inclusive language analysis | `transformers` |
@@ -1046,6 +1114,8 @@ The validator includes 13 scanner modules, each specializing in a category of ri
 | **ComplianceAudit** | License, data residency, and regulatory compliance | `presidio-analyzer` |
 | **CodeAudit** | Multi-language static analysis (Python AST, TS/JS, Rust, Java/Kotlin, Go, Ruby, C#, PHP) | `bandit` |
 | **DynamicScan** | Live MCP server scanning: tool discovery, description analysis, attack simulation | — |
+| **YaraScan** | YARA signature matching for malware, webshells, cryptominers, and hack tools | `yara-python` (optional — install with `[security]`) |
+| **TaintTrack** | AST-based data-flow taint tracking: credential exfiltration, file-to-network leaks, remote-input-to-exec chains | — |
 
 ### Scanner-to-artifact-type coverage
 
@@ -1124,6 +1194,161 @@ config = ValidatorConfig(custom_plugin_dirs=["./my-scanners"])
 
 ---
 
+## Network Connectivity
+
+By default, the validator runs **fully offline**. All network-dependent features are disabled unless explicitly enabled via configuration or CLI flags.
+
+| Feature | Config flag | CLI flag | Required package | Description |
+|---------|-------------|----------|------------------|-------------|
+| OSV.dev vulnerability lookup | `allow_network_requests: true` | `--allow-network` | `requests` (`[network]`) | Real-time CVE lookups for `DepScan` via [osv.dev](https://osv.dev/) |
+| Remote artifact scan | `allow_remote_scan: true` | `--allow-remote-scan` | — | Scan artifacts fetched from remote URLs |
+| LLM meta-analysis | `allow_llm_analysis: true` | `--allow-llm` | `openai` (`[llm]`) | Enrich HIGH/CRITICAL findings with LLM explanations and remediation detail |
+| Semantic model download | *(automatic on first use)* | — | `sentence-transformers` (`[ml]`) | One-time download of embedding model from Hugging Face Hub |
+
+### Network endpoints and firewall allowlisting
+
+If you run the validator in environments with egress filtering (corporate proxies, air-gapped CI, Kubernetes network policies), allowlist these endpoints:
+
+| Endpoint | Port | Protocol | Feature | Notes |
+|----------|------|----------|---------|-------|
+| `api.osv.dev` | 443 | HTTPS | OSV.dev vulnerability lookup | POST to `/v1/querybatch` |
+| `api.openai.com` | 443 | HTTPS | LLM enrichment (OpenAI) | Chat completions API |
+| `huggingface.co` | 443 | HTTPS | Semantic model download | One-time model download (~80 MB) |
+| `cdn-lfs.huggingface.co` | 443 | HTTPS | Semantic model download | Large file storage for model weights |
+
+> **Fully offline operation:** If you pre-download the embedding model (or use the Docker image which bakes it in), and disable `allow_network_requests` + `allow_llm_analysis`, the validator makes **zero outbound connections**. No telemetry, no phone-home, no license checks.
+
+### Enabling network requests
+
+```bash
+# Install network dependency
+pip install ai-artifact-risk-validator[network]
+
+# Run scan with OSV lookups enabled
+ai-artifact-validator verify ./my-artifacts --allow-network
+
+# Via config file
+echo "allow_network_requests: true" >> .aav.yaml
+```
+
+### LLM-powered finding enrichment
+
+#### When to use LLM enrichment
+
+LLM enrichment is most valuable when:
+
+- **Security review of unfamiliar code** — The LLM explains *why* a finding is dangerous in plain English, helping developers who are not security specialists understand the risk without researching CVEs and attack patterns themselves.
+- **Triage of large scan reports** — When a scan produces 20+ HIGH/CRITICAL findings, the enriched explanations and remediation steps help prioritize which ones to fix first.
+- **Onboarding new team members** — Junior developers get actionable, context-specific guidance ("change line 42 to use parameterized queries") instead of generic remediation boilerplate.
+- **Compliance reporting** — The enriched `explanation` and `remediation_detail` fields produce audit-ready documentation that explains each risk to non-technical stakeholders.
+- **CI/CD gate justification** — When a pipeline is blocked, the enriched output answers "why was my build rejected?" without requiring manual security review.
+
+#### What LLM enrichment does NOT do
+
+- It does **not** discover new findings — detection is handled entirely by the 16 built-in scanners
+- It does **not** change severity scores, gate decisions, or confidence values
+- It does **not** send raw artifact content to the LLM — only structured finding metadata (risk ID, title, evidence snippet) is submitted
+- It is **not** required for the validator to function — all scans produce complete results without LLM
+
+#### Benefits
+
+| Benefit | Without LLM | With LLM |
+|---------|-------------|----------|
+| Finding title | `"Credential Exfiltration Chain"` | Same |
+| Description | Generic 1-sentence description from risk registry | Same |
+| Explanation | *(empty)* | 2-3 sentence plain-English explanation of why this specific instance is risky, referencing the actual file and evidence |
+| Remediation | Generic recommendation | 3-5 specific, actionable bullet points tailored to the detected code pattern |
+| Time to understand | Developer must research the risk ID | Immediate understanding from the explanation |
+| Audit readiness | Manual write-up needed | Report is self-documenting |
+
+#### Example: before and after enrichment
+
+**Before** (standard scan output):
+```json
+{
+  "id": "TT-S3",
+  "title": "Credential Exfiltration Chain",
+  "description": "Credentials or secrets flow to network output sinks.",
+  "remediation": "Never transmit credentials to external endpoints. Use a secrets manager.",
+  "explanation": null,
+  "remediation_detail": null
+}
+```
+
+**After** (with `--allow-llm`):
+```json
+{
+  "id": "TT-S3",
+  "title": "Credential Exfiltration Chain",
+  "description": "Credentials or secrets flow to network output sinks.",
+  "remediation": "Never transmit credentials to external endpoints. Use a secrets manager.",
+  "explanation": "The variable 'api_key' is read from os.environ['API_KEY'] on line 12 and then passed directly to requests.post() on line 15. An attacker who controls the destination URL could harvest this credential at runtime, gaining unauthorized access to the API.",
+  "remediation_detail": "1. Remove the requests.post() call that transmits the credential.\n2. If the API key must be forwarded, use a server-side proxy that holds the key.\n3. Rotate the exposed API_KEY immediately.\n4. Add egress firewall rules to restrict which domains this service can contact.\n5. Use a secrets manager (AWS Secrets Manager, HashiCorp Vault) instead of environment variables."
+}
+```
+
+#### How to enable LLM enrichment
+
+```bash
+# 1. Install the LLM dependency
+pip install ai-artifact-risk-validator[llm]
+
+# 2. Set your OpenAI API key
+export OPENAI_API_KEY=sk-...          # Linux/macOS
+$env:OPENAI_API_KEY = "sk-..."        # PowerShell
+
+# 3. Run a scan with LLM enrichment enabled
+ai-artifact-validator verify ./my-artifacts --allow-llm
+
+# Use a different model (default: gpt-4o-mini)
+ai-artifact-validator verify ./my-artifacts --allow-llm --llm-model gpt-4o
+
+# Use a different provider
+ai-artifact-validator verify ./my-artifacts --allow-llm --llm-provider openai
+
+# Via .aav.yaml config
+# allow_llm_analysis: true
+# llm_model: gpt-4o-mini
+```
+
+#### Configuration via environment variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `OPENAI_API_KEY` | OpenAI API key (required for LLM enrichment) | `sk-proj-abc123...` |
+| `OPENAI_ORG_ID` | OpenAI organization ID (optional, for enterprise accounts) | `org-xyz789` |
+| `OPENAI_BASE_URL` | Custom API base URL (for Azure OpenAI or self-hosted endpoints) | `https://my-company.openai.azure.com/` |
+
+> **Azure OpenAI:** Set `OPENAI_BASE_URL` to your Azure endpoint and `OPENAI_API_KEY` to your Azure API key. The OpenAI Python SDK handles Azure-compatible endpoints transparently.
+
+#### Cost and budget controls
+
+LLM enrichment has built-in cost protection:
+
+- **Token budget:** Capped at 10,000 tokens per scan session (input + output combined)
+- **Enrichment limit:** Maximum 20 findings enriched per scan
+- **Severity filter:** Only HIGH and CRITICAL findings are sent to the LLM (MEDIUM/LOW/INFO are skipped)
+- **Max tokens per call:** Each LLM response is limited to 500 tokens
+- **Estimated cost per scan:** ~$0.01-0.05 USD with `gpt-4o-mini` (typical 5-15 HIGH/CRITICAL findings)
+
+When the budget is exhausted mid-scan, remaining findings are returned with their standard (non-enriched) descriptions. No partial or corrupted results.
+
+#### Security model
+
+The LLM enrichment layer is hardened against adversarial artifacts:
+
+1. **Immutable system prompt** — The security instructions sent to the LLM cannot be overridden by config or artifact content
+2. **Metadata-only submission** — Only structured finding metadata (risk ID, title, severity, evidence snippet) is sent; raw artifact file content is never transmitted
+3. **Evidence truncation** — Evidence snippets are capped at 500 characters to limit the attack surface
+4. **Anti-jailbreak detection** — The system prompt instructs the LLM to flag any artifact content that attempts to manipulate scoring as a P-S1 (Prompt Injection) finding
+5. **No write-back to severity** — LLM output populates `explanation` and `remediation_detail` only; it cannot alter `severity_score`, `gate_action`, or `confidence`
+
+> **Security:** The system prompt sent to the LLM is hardcoded and cannot be overridden by artifact content. Any finding that instructs the model to change scoring, ignore findings, or act as a different AI is itself flagged as a risk.
+
+> **Token budget:** LLM enrichment is capped at 10,000 tokens per scan session and 20 enrichments per scan to prevent cost overruns.
+
+---
+
 ## Risk Framework Reference
 
 ### Artifact types (14)
@@ -1185,8 +1410,9 @@ Risk IDs follow the pattern `{PREFIX}-{CATEGORY_CODE}{NUMBER}`:
 - **Prefix**: Artifact type abbreviation (P=Prompt, SK=Skill, A=Agent, SOP, ST=Steering, MCP, H=Hook, I=Instruction, PL=Plugin, M=Memory, RAG, EV=EvalHarness, OW=Orchestration, API)
 - **Category code**: S=Security, P=Performance, Q=Quality, R=Reliability
 - **Cross-cutting prefixes**: GOV, ETH, CMP, REG, MOD, OBS
+- **New scanner prefixes**: OH=Orchestration Hijack, SPL=System Prompt Leak, RA=Rogue Agent, TR=Trust & Reliability, TT=Taint Tracking, Y=YARA, AST=AST code analysis, DEP=Dependency
 
-Examples: `P-S1` (Prompt Security #1), `MCP-Q3` (MCP Quality #3), `GOV-2` (Governance #2)
+Examples: `P-S1` (Prompt Security #1), `MCP-Q3` (MCP Quality #3), `TT-S3` (Taint-Tracking credential exfil), `Y-S1` (YARA malware signature)
 
 ---
 

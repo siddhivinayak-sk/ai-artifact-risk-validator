@@ -14,6 +14,7 @@ from ai_artifact_risk_validator.models.enums import ArtifactType, GateAction
 from ai_artifact_risk_validator.models.findings import ScanFinding
 from ai_artifact_risk_validator.models.report import ScanReport, ScanSummary
 from ai_artifact_risk_validator.pipeline.gate import assign_gate_action, compute_overall_gate
+from ai_artifact_risk_validator.pipeline.scorer import compute_risk_score, severity_band
 
 
 class ReportGenerator:
@@ -29,6 +30,7 @@ class ReportGenerator:
         artifact_path: str,
         artifact_type: ArtifactType | None = None,
         errors: list[str] | None = None,
+        has_executable_scripts: bool = False,
     ) -> ScanReport:
         """Generate a complete ScanReport from findings and context.
 
@@ -37,11 +39,15 @@ class ReportGenerator:
             artifact_path: The path that was scanned.
             artifact_type: Optional artifact type (None for directory scans).
             errors: Optional list of error/diagnostic messages.
+            has_executable_scripts: Whether the artifact includes executable files
+                (triggers the 1.3x risk multiplier in aggregate score calculation).
 
         Returns:
-            A fully assembled ScanReport with computed summary.
+            A fully assembled ScanReport with computed summary and risk score.
         """
         summary = self._compute_summary(findings)
+        risk_score = compute_risk_score(findings, has_executable_scripts)
+        risk_sev, risk_rec = severity_band(risk_score)
 
         return ScanReport(
             scan_id=str(uuid4()),
@@ -52,6 +58,10 @@ class ReportGenerator:
             findings=findings,
             summary=summary,
             errors=errors or [],
+            risk_score=risk_score,
+            risk_severity=risk_sev,
+            risk_recommendation=risk_rec,
+            has_executable_scripts=has_executable_scripts,
         )
 
     def _compute_summary(self, findings: list[ScanFinding]) -> ScanSummary:

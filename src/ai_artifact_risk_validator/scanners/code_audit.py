@@ -173,6 +173,38 @@ _RISK_METADATA: dict[str, dict[str, Any]] = {
         "description": "Agent has access to a combination of tools that together enable dangerous operations not intended individually.",
         "remediation": "Audit tool combinations for emergent risks. Implement tool interaction policies. Restrict dangerous combinations.",
     },
+    # Rogue Agent risks
+    "RA-S1": {
+        "title": "Rogue Agent: Persistent Code Modification",
+        "severity_score": 10,
+        "severity_label": SeverityLabel.CRITICAL,
+        "priority": Priority.P0,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Agent code attempts to modify its own source files or reload itself using importlib — hallmark of self-modification.",
+        "remediation": "Agents must never write to their own source directory. Apply read-only filesystem mounts for agent code directories.",
+    },
+    "RA-S2": {
+        "title": "Rogue Agent: Unauthorized Persistence Mechanism",
+        "severity_score": 9,
+        "severity_label": SeverityLabel.CRITICAL,
+        "priority": Priority.P0,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Agent code installs a persistence mechanism (cron, systemd, scheduled task, registry Run key) to survive reboots.",
+        "remediation": "Agents must never install cron jobs, systemd services, or scheduled tasks. Apply seccomp/AppArmor profiles.",
+    },
+    # Encoded execution chain risk
+    "AST-S8": {
+        "title": "Dangerous Execution Chain: Encoded Payload Execution",
+        "severity_score": 10,
+        "severity_label": SeverityLabel.CRITICAL,
+        "priority": Priority.P0,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Artifact contains a multi-stage chain where an encoded payload (base64, hex) is decoded and executed at runtime.",
+        "remediation": "Remove all runtime-decoded execution chains. There is no legitimate use case for this pattern in AI skill artifacts.",
+    },
 }
 
 # --- Artifact type to risk ID mappings ---
@@ -358,6 +390,34 @@ _RE_INSECURE_HTTP = re.compile(r"(http://(?!localhost|127\.0\.0\.1|0\.0\.0\.0)[^
 _RE_PRIVILEGE_ESCALATION = re.compile(
     r"\b(sudo|runas|chmod\s+[0-7]*7[0-7]*|setuid|setgid|os\.setuid|os\.setgid"
     r"|ctypes\.windll|win32api\.AdjustTokenPrivileges)\b",
+    re.IGNORECASE,
+)
+
+# Rogue agent: self-modification patterns
+_RE_ROGUE_SELF_MODIFY = re.compile(
+    r"open\s*\(\s*__file__\s*,\s*['\"]w['\"]"
+    r"|open\s*\(\s*__file__\s*,\s*['\"]a['\"]"
+    r"|importlib\.reload\s*\(",
+    re.IGNORECASE,
+)
+
+# Rogue agent: persistence installation patterns
+_RE_ROGUE_PERSISTENCE = re.compile(
+    r"\b(crontab\s+-[lr]|crontab\s+[^-]"
+    r"|systemctl\s+enable"
+    r"|schtasks\s+/[Cc]reate"
+    r"|at\s+\d"
+    r"|launchctl\s+load"
+    r"|rc\.local"
+    r"|CurrentVersion\\\\Run\b"
+    r"|HKEY_CURRENT_USER.*Run\b"
+    r"|HKCU.*Run\b)\b",
+    re.IGNORECASE,
+)
+
+# AST-S8: encoded payload execution patterns
+_RE_ENCODED_EXEC = re.compile(
+    r"(exec|eval|compile)\s*\(\s*(base64\.b64decode|base64\.decodebytes|binascii\.unhexlify|urllib\.parse\.unquote)\s*\(",
     re.IGNORECASE,
 )
 
@@ -735,6 +795,9 @@ class CodeAuditScanner(BaseScanner):
             "PL-S9",
             "A-S3",
             "A-S7",
+            "RA-S1",
+            "RA-S2",
+            "AST-S8",
         ]
 
     def is_available(self) -> bool:
@@ -1129,6 +1192,67 @@ class CodeAuditScanner(BaseScanner):
 
         return findings
 
+    def _scan_rogue_agent(
+        self,
+        artifact_content: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Detect rogue-agent patterns: self-modification and persistence installation."""
+        findings: list[ScanFinding] = []
+        for line_num, line in enumerate(artifact_content.splitlines(), start=1):
+            m = _RE_ROGUE_SELF_MODIFY.search(line)
+            if m:
+                findings.append(
+                    self._create_finding(
+                        risk_id="RA-S1",
+                        artifact_type=artifact_type,
+                        artifact_path=artifact_path,
+                        evidence=line.strip()[:200],
+                        confidence=0.92,
+                        line=line_num,
+                        detail="Rogue agent self-modification pattern",
+                    )
+                )
+            m2 = _RE_ROGUE_PERSISTENCE.search(line)
+            if m2:
+                findings.append(
+                    self._create_finding(
+                        risk_id="RA-S2",
+                        artifact_type=artifact_type,
+                        artifact_path=artifact_path,
+                        evidence=line.strip()[:200],
+                        confidence=0.90,
+                        line=line_num,
+                        detail="Rogue agent persistence installation pattern",
+                    )
+                )
+        return findings
+
+    def _scan_encoded_exec(
+        self,
+        artifact_content: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Detect encoded payload execution chains (AST-S8)."""
+        findings: list[ScanFinding] = []
+        for line_num, line in enumerate(artifact_content.splitlines(), start=1):
+            m = _RE_ENCODED_EXEC.search(line)
+            if m:
+                findings.append(
+                    self._create_finding(
+                        risk_id="AST-S8",
+                        artifact_type=artifact_type,
+                        artifact_path=artifact_path,
+                        evidence=line.strip()[:200],
+                        confidence=0.96,
+                        line=line_num,
+                        detail="Encoded payload execution chain: decode + exec",
+                    )
+                )
+        return findings
+
     def scan(
         self,
         artifact_content: str,
@@ -1195,5 +1319,9 @@ class CodeAuditScanner(BaseScanner):
                 for f in regex_findings:
                     f.confidence = 0.60
                 findings.extend(regex_findings)
+
+        # Rogue-agent and encoded-exec patterns apply to all languages
+        findings.extend(self._scan_rogue_agent(artifact_content, artifact_type, artifact_path))
+        findings.extend(self._scan_encoded_exec(artifact_content, artifact_type, artifact_path))
 
         return findings

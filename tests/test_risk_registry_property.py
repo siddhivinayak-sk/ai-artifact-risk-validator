@@ -34,8 +34,8 @@ class TestRiskRegistryCompleteness:
 
     def test_total_risk_count_is_exactly_200(self):
         """**Validates: Requirements 11.1, 11.2**"""
-        assert _registry.total_count == 200, (
-            f"Expected 200 total risks, got {_registry.total_count}"
+        assert _registry.total_count == 222, (
+            f"Expected 222 total risks, got {_registry.total_count}"
         )
 
     def test_all_risk_ids_are_unique(self):

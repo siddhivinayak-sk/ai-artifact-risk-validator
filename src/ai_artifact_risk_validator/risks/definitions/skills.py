@@ -366,4 +366,144 @@ RISKS: list[RiskDefinition] = [
         owasp_refs=[],
         cwe_refs=[],
     ),
+    # ===== Trigger Abuse Risks (TR-S1 to TR-S3) =====
+    RiskDefinition(
+        id="TR-S1",
+        title="Overly Broad Skill Trigger Pattern",
+        artifact_types=[ArtifactType.SKILL],
+        category=RiskCategory.SECURITY,
+        severity_score=6,
+        severity_label=SeverityLabel.MEDIUM,
+        priority=Priority.P2,
+        gate_action=GateAction.WARN,
+        description=(
+            "The skill's trigger patterns (intents, regex, or topic matchers in the "
+            "YAML/JSON definition) are so broad that they activate on unintended inputs, "
+            "enabling trigger-hijacking attacks where an adversary crafts input to "
+            "coerce unexpected skill invocation."
+        ),
+        examples=[
+            "Trigger regex '.*' matches all inputs",
+            "Intent pattern 'help' with no context constraints fires on every help request",
+            "Topic matcher accepts any single word",
+        ],
+        mitigation=[
+            "Use specific trigger patterns with context constraints",
+            "Require multiple trigger conditions (AND logic) for sensitive skills",
+            "Test trigger coverage with adversarial inputs before deployment",
+        ],
+        detection_mechanisms=[
+            "YAML/JSON trigger pattern analysis: wildcard detection",
+            "Trigger regex specificity scoring: patterns matching >50% of inputs flagged",
+        ],
+        scanner_modules=[ScannerModule.QUALITY_LINT],
+        owasp_refs=["LLM06:2025 Excessive Agency"],
+        cwe_refs=["CWE-20"],
+    ),
+    RiskDefinition(
+        id="TR-S2",
+        title="Skill Trigger Hijack via Injected Keyword",
+        artifact_types=[ArtifactType.SKILL],
+        category=RiskCategory.SECURITY,
+        severity_score=8,
+        severity_label=SeverityLabel.HIGH,
+        priority=Priority.P0,
+        gate_action=GateAction.BLOCK,
+        description=(
+            "The skill's trigger keywords include terms that could be embedded by an "
+            "adversary in a benign-looking message to covertly activate the skill "
+            "(e.g., a keyword that appears naturally in common sentences). This enables "
+            "indirect prompt injection to hijack skill execution."
+        ),
+        examples=[
+            "Trigger keyword 'please' fires on almost all polite requests",
+            "Trigger phrase 'tell me' activates a data-export skill",
+            "Single-character or single-word triggers with no semantic specificity",
+        ],
+        mitigation=[
+            "Use semantically specific multi-word trigger phrases",
+            "Add confidence thresholds to trigger matching",
+            "Require explicit user confirmation for high-risk skill activations",
+        ],
+        detection_mechanisms=[
+            "Trigger keyword frequency analysis against common word corpora",
+            "Single-word trigger detection with semantic specificity scoring",
+        ],
+        scanner_modules=[ScannerModule.INJECTION_DET, ScannerModule.QUALITY_LINT],
+        owasp_refs=["LLM01:2025 Prompt Injection", "LLM06:2025 Excessive Agency"],
+        cwe_refs=["CWE-20", "CWE-74"],
+    ),
+    RiskDefinition(
+        id="TR-S3",
+        title="Missing Trigger Authorization Check",
+        artifact_types=[ArtifactType.SKILL],
+        category=RiskCategory.SECURITY,
+        severity_score=5,
+        severity_label=SeverityLabel.MEDIUM,
+        priority=Priority.P2,
+        gate_action=GateAction.WARN,
+        description=(
+            "The skill definition does not specify any authorization check before "
+            "executing triggered actions. Any user who can send the trigger phrase can "
+            "activate the skill, including unauthenticated or low-privilege users."
+        ),
+        examples=[
+            "Skill with admin_action=true but no required_role or auth_check field",
+            "Data export skill with no user_permission requirement",
+        ],
+        mitigation=[
+            "Add required_role, auth_check, or permission_scope to the skill definition",
+            "Require authentication tokens for high-impact skill activations",
+            "Document expected caller permissions in the skill interface spec",
+        ],
+        detection_mechanisms=[
+            "Key-presence check: required_role / auth_check / permission_scope",
+            "Skill definition analysis: high-impact verbs without authorization keys",
+        ],
+        scanner_modules=[ScannerModule.PERM_AUDIT],
+        owasp_refs=["LLM06:2025 Excessive Agency"],
+        cwe_refs=["CWE-284", "CWE-732"],
+    ),
+    # ===== Advanced Execution Chain Risk (AST-S8) =====
+    RiskDefinition(
+        id="AST-S8",
+        title="Dangerous Execution Chain: Encoded Payload Execution",
+        artifact_types=[
+            ArtifactType.SKILL,
+            ArtifactType.AGENT,
+            ArtifactType.HOOK,
+            ArtifactType.PLUGIN,
+        ],
+        category=RiskCategory.SECURITY,
+        severity_score=10,
+        severity_label=SeverityLabel.CRITICAL,
+        priority=Priority.P0,
+        gate_action=GateAction.BLOCK,
+        description=(
+            "The artifact contains a multi-stage execution chain where an encoded "
+            "payload (base64, hex, URL-encoded) is decoded at runtime and then "
+            "immediately executed via exec(), eval(), or subprocess. This is the "
+            "canonical pattern for obfuscated malware delivery and has no legitimate use."
+        ),
+        examples=[
+            "exec(base64.b64decode(PAYLOAD)) — decoded bytes executed directly",
+            "eval(urllib.parse.unquote(encoded_code))",
+            "subprocess.run([base64.b64decode(cmd).decode()])",
+            "compile(binascii.unhexlify(hex_code), '<string>', 'exec')",
+        ],
+        mitigation=[
+            "Remove all runtime-decoded execution chains immediately",
+            "There is no legitimate use case for this pattern in AI skill artifacts",
+            "Investigate the artifact's author and distribution channel",
+            "Report to the artifact registry if the artifact was from a public source",
+        ],
+        detection_mechanisms=[
+            "AST / regex: base64.b64decode() / binascii.unhexlify() result as direct arg to exec/eval",
+            "YARA malware.yar: Malware_Base64EncodedPayload rule",
+            "Pattern: compile(decode_fn(...), ...) + exec(compiled_code)",
+        ],
+        scanner_modules=[ScannerModule.CODE_AUDIT, ScannerModule.YARA_SCAN],
+        owasp_refs=["LLM03:2025 Supply Chain Risks", "A03:2021 Injection"],
+        cwe_refs=["CWE-506", "CWE-94"],
+    ),
 ]

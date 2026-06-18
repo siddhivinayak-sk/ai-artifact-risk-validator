@@ -134,6 +134,27 @@ _CONTEXT_POISONING_PATTERNS: list[re.Pattern[str]] = [
         r"\bprint\s+(the\s+)?(above|initial|original)\s+(text|instructions?|prompt)\b",
         re.IGNORECASE,
     ),
+    # SPL-S1: confidentiality directives that signal secret instructions
+    re.compile(
+        r"\bnever\s+(reveal|disclose|share|repeat)\s+(the\s+)?(contents?\s+of\s+this\s+prompt|these\s+instructions?|your\s+prompt)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bsay\s+you\s+have\s+no\s+system\s+prompt\b", re.IGNORECASE),
+    re.compile(r"\b(this\s+prompt|these\s+instructions?)\s+is\s+confidential\b", re.IGNORECASE),
+    re.compile(r"\bdeny\s+having\s+(instructions?|a\s+system\s+prompt|rules?)\b", re.IGNORECASE),
+    # SPL-S3: input echoing patterns
+    re.compile(
+        r"\b(repeat|echo)\s+(the\s+)?user['\u2019]?s\s+(message|question|input)\b", re.IGNORECASE
+    ),
+    re.compile(
+        r"\bstart\s+(your\s+)?reply\s+with\s+the\s+user['\u2019]?s\s+(exact\s+)?(question|message)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bwrite\s+(their|the\s+user['\u2019]?s)\s+question\s+back\b", re.IGNORECASE),
+    re.compile(
+        r"\bwhat\s+(are|were)\s+your\s+(initial|original|full)\s+instructions?\b", re.IGNORECASE
+    ),
+    re.compile(r"\bwrite\s+your\s+full\s+system\s+prompt\b", re.IGNORECASE),
 ]
 
 # Safety guardrail weakening
@@ -390,6 +411,63 @@ _RISK_METADATA: dict[str, dict[str, Any]] = {
         "description": "Agent trusts messages from other agents without verification.",
         "remediation": "Validate inter-agent messages and implement trust boundaries.",
     },
+    # System Prompt Leakage risks
+    "SPL-S1": {
+        "title": "System Prompt Contains Hidden-Instruction Confidentiality Directive",
+        "severity_score": 8,
+        "severity_label": SeverityLabel.HIGH,
+        "priority": Priority.P0,
+        "gate_action": GateAction.BLOCK,
+        "description": "Prompt instructs the LLM to deny or conceal the existence of its system prompt, signalling sensitive hidden logic.",
+        "remediation": "Remove confidentiality directives. Avoid embedding secrets in prompts.",
+    },
+    "SPL-S3": {
+        "title": "System Prompt Leakage Vector: User Input Echoing",
+        "severity_score": 8,
+        "severity_label": SeverityLabel.HIGH,
+        "priority": Priority.P0,
+        "gate_action": GateAction.BLOCK,
+        "description": "Prompt instructs the LLM to echo user input verbatim, enabling attackers to extract system prompt contents.",
+        "remediation": "Remove input-echoing instructions and use output templates that do not include verbatim user input.",
+    },
+    # Output Handling risks
+    "OH-S1": {
+        "title": "Unvalidated Agent Output Passed to Downstream Executor",
+        "severity_score": 8,
+        "severity_label": SeverityLabel.HIGH,
+        "priority": Priority.P0,
+        "gate_action": GateAction.BLOCK,
+        "description": "Agent output is forwarded to a code executor or tool invocation without validation.",
+        "remediation": "Validate agent output against a schema before forwarding to code execution or tool sinks.",
+    },
+    "OH-S2": {
+        "title": "Agent Output Contains Secret Material",
+        "severity_score": 6,
+        "severity_label": SeverityLabel.MEDIUM,
+        "priority": Priority.P2,
+        "gate_action": GateAction.WARN,
+        "description": "Agent output-handling code may surface secret values in responses.",
+        "remediation": "Apply output redaction before returning agent responses.",
+    },
+    # Memory poisoning risks
+    "M-S5": {
+        "title": "Memory Poisoning via Injected False Fact",
+        "severity_score": 8,
+        "severity_label": SeverityLabel.HIGH,
+        "priority": Priority.P0,
+        "gate_action": GateAction.BLOCK,
+        "description": "Memory contents contain injected false facts or override instructions.",
+        "remediation": "Validate memory entries against a content policy before persistence.",
+    },
+    "M-S7": {
+        "title": "Memory Contains Exfiltration Payload",
+        "severity_score": 8,
+        "severity_label": SeverityLabel.HIGH,
+        "priority": Priority.P0,
+        "gate_action": GateAction.BLOCK,
+        "description": "Memory contents contain an embedded payload designed to cause the AI to exfiltrate data.",
+        "remediation": "Scan memory contents for exfiltration patterns before retrieval.",
+    },
 }
 
 # Mapping of artifact types to their primary risk IDs for injection detection
@@ -399,11 +477,12 @@ _ARTIFACT_RISK_MAP: dict[ArtifactType, list[str]] = {
     ArtifactType.STEERING: ["ST-S1", "ST-S2", "ST-S5"],
     ArtifactType.MCP: ["MCP-S3", "MCP-S6"],
     ArtifactType.API_SCHEMA: ["API-S1"],
-    ArtifactType.MEMORY: ["M-S1"],
+    ArtifactType.MEMORY: ["M-S1", "M-S5", "M-S7"],
     ArtifactType.RAG: ["RAG-S1"],
     ArtifactType.ORCHESTRATION: ["OW-S1"],
-    ArtifactType.AGENT: ["A-S4", "A-S5"],
+    ArtifactType.AGENT: ["A-S4", "A-S5", "OH-S1", "OH-S2"],
     ArtifactType.SKILL: ["P-S1", "P-S2", "P-S6", "P-S7", "P-S9", "P-S10"],
+    ArtifactType.PROMPT: ["P-S1", "P-S2", "P-S6", "P-S7", "P-S9", "P-S10", "SPL-S1", "SPL-S3"],
 }
 
 # ============================================================
