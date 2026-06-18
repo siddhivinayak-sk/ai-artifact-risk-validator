@@ -52,7 +52,7 @@ def cli() -> None:
 @click.option(
     "--format",
     "output_format",
-    type=click.Choice(["json", "text", "html", "sarif"], case_sensitive=False),
+    type=click.Choice(["json", "text", "html", "sarif", "markdown"], case_sensitive=False),
     default="text",
     help="Output format for the report.",
 )
@@ -139,6 +139,36 @@ def cli() -> None:
     default=None,
     help="Minimum similarity score for semantic matches (0.0-1.0).",
 )
+@click.option(
+    "--allow-network",
+    is_flag=True,
+    default=False,
+    help="Enable network requests: live CVE lookup (OSV.dev), abandoned-dep check. Requires internet.",
+)
+@click.option(
+    "--allow-remote-scan",
+    is_flag=True,
+    default=False,
+    help="Enable remote artifact scanning: git URL cloning, HTTP URL downloads. Requires git on PATH.",
+)
+@click.option(
+    "--allow-llm",
+    is_flag=True,
+    default=False,
+    help="Enable LLM-powered semantic analysis. Requires API key (AAV_OPENAI_API_KEY etc.).",
+)
+@click.option(
+    "--llm-provider",
+    type=click.Choice(["openai", "anthropic", "nvidia"], case_sensitive=False),
+    default=None,
+    help="LLM provider for analysis (default: openai). Used with --allow-llm.",
+)
+@click.option(
+    "--llm-model",
+    type=str,
+    default=None,
+    help="LLM model override. Uses provider default if not set. Used with --allow-llm.",
+)
 def verify(
     path: str,
     output: str | None,
@@ -156,6 +186,11 @@ def verify(
     semantic_enabled: bool | None,
     semantic_model: str | None,
     semantic_threshold: float | None,
+    allow_network: bool,
+    allow_remote_scan: bool,
+    allow_llm: bool,
+    llm_provider: str | None,
+    llm_model: str | None,
 ) -> None:
     """Scan PATH for AI artifact risks and produce a validation report.
 
@@ -167,6 +202,7 @@ def verify(
     from ai_artifact_risk_validator.models.config import ValidatorConfig
     from ai_artifact_risk_validator.models.enums import ScannerModule
     from ai_artifact_risk_validator.reporting.formatters.html_formatter import format_html
+    from ai_artifact_risk_validator.reporting.formatters.markdown_formatter import format_markdown
     from ai_artifact_risk_validator.reporting.formatters.sarif_formatter import format_sarif
     from ai_artifact_risk_validator.reporting.formatters.text_formatter import format_text
     from ai_artifact_risk_validator.reporting.serializer import ReportSerializer
@@ -206,6 +242,21 @@ def verify(
 
     if dynamic_server_timeout is not None:
         cli_overrides["dynamic_server_timeout"] = dynamic_server_timeout
+
+    if allow_network:
+        cli_overrides["allow_network_requests"] = True
+
+    if allow_remote_scan:
+        cli_overrides["allow_remote_scan"] = True
+
+    if allow_llm:
+        cli_overrides["allow_llm_analysis"] = True
+
+    if llm_provider is not None:
+        cli_overrides["llm_provider"] = llm_provider.lower()
+
+    if llm_model is not None:
+        cli_overrides["llm_model"] = llm_model
 
     # Semantic CLI overrides
     semantic_overrides: dict[str, object] = {}
@@ -276,6 +327,8 @@ def verify(
         report_output = format_html(report)
     elif output_format == "sarif":
         report_output = format_sarif(report)
+    elif output_format == "markdown":
+        report_output = format_markdown(report)
     else:
         serializer = ReportSerializer()
         report_output = serializer.serialize(report)

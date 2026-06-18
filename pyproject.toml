@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ai-artifact-risk-validator"
-version = "0.8.1"
+version = "0.9.0"
 description = "Validates AI artifacts for security, performance, quality, compliance, and operational risks"
 readme = "README.md"
 license = "MIT"
@@ -62,6 +62,7 @@ security = [
     "bandit>=1.7",
     "pip-audit>=2.6",
     "safety>=2.3",
+    "yara-python>=4.3",
 ]
 provenance = [
     "gitpython>=3.1",
@@ -71,12 +72,20 @@ quality = [
     "nltk>=3.8",
     "networkx>=3.0",
 ]
+network = [
+    "requests>=2.28",
+]
+llm = [
+    "openai>=1.0",
+]
 all = [
     "ai-artifact-risk-validator[ml]",
     "ai-artifact-risk-validator[secrets]",
     "ai-artifact-risk-validator[security]",
     "ai-artifact-risk-validator[provenance]",
     "ai-artifact-risk-validator[quality]",
+    "ai-artifact-risk-validator[network]",
+    "ai-artifact-risk-validator[llm]",
 ]
 
 [project.scripts]
@@ -97,6 +106,8 @@ portability_chk = "ai_artifact_risk_validator.scanners.portability_chk:Portabili
 compliance_audit = "ai_artifact_risk_validator.scanners.compliance_audit:ComplianceAuditScanner"
 code_audit = "ai_artifact_risk_validator.scanners.code_audit:CodeAuditScanner"
 dynamic_scan = "ai_artifact_risk_validator.scanners.dynamic:DynamicScanner"
+yara_scan = "ai_artifact_risk_validator.scanners.yara_scan:YaraScanScanner"
+taint_track = "ai_artifact_risk_validator.scanners.taint_track:TaintTrackScanner"
 
 [project.urls]
 Homepage = "https://github.com/ai-artifact-validator/ai-artifact-risk-validator"
@@ -106,6 +117,11 @@ Issues = "https://github.com/ai-artifact-validator/ai-artifact-risk-validator/is
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ai_artifact_risk_validator"]
+include = [
+    "src/ai_artifact_risk_validator/**/*.py",
+    "src/ai_artifact_risk_validator/yara_rules/*.yar",
+    "src/ai_artifact_risk_validator/data/*.json",
+]
 
 # --- Ruff Configuration ---
 [tool.ruff]
@@ -207,12 +223,13 @@ module = [
     "networkx.*",
     "git.*",
     "bandit.*",
-    "pip_audit.*",
-    "safety.*",
     "yaml.*",
     "jsonschema.*",
     "cryptography.*",
     "numpy.*",
+    "openai.*",
+    "requests.*",
+    "yara.*",
 ]
 ignore_missing_imports = true
 

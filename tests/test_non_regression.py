@@ -130,6 +130,10 @@ class TestJsonFormatNonRegression:
             "findings",
             "summary",
             "errors",
+            "risk_score",
+            "risk_severity",
+            "risk_recommendation",
+            "has_executable_scripts",
         }
         assert expected_keys == set(parsed.keys())
 
@@ -174,6 +178,8 @@ class TestJsonFormatNonRegression:
             "false_positive",
             "semantic_score",
             "timestamp",
+            "explanation",
+            "remediation_detail",
         }
         assert expected_finding_keys == set(finding.keys())
 
@@ -260,6 +266,10 @@ class TestJsonFormatNonRegression:
             "findings",
             "summary",
             "errors",
+            "risk_score",
+            "risk_severity",
+            "risk_recommendation",
+            "has_executable_scripts",
         }
         assert expected_keys == set(parsed.keys())
 

@@ -7,10 +7,14 @@ RUN apt-get update && \
         build-essential \
         gcc \
         g++ \
+        git \
     && rm -rf /var/lib/apt/lists/*
 
 # Install CPU-only PyTorch first (avoids pulling ~2.5GB GPU wheels)
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+# Install yara-python for YARA signature scanning
+RUN pip install --no-cache-dir "yara-python>=4.3"
 
 # Copy project files and install with all optional dependencies
 COPY . /src

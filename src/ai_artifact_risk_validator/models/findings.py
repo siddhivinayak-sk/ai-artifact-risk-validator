@@ -4,7 +4,7 @@ Defines FindingLocation and ScanFinding Pydantic models used to represent
 individual risk detections produced by scanner modules.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from pydantic import BaseModel, Field
 
@@ -54,4 +54,7 @@ class ScanFinding(BaseModel):
     references: list[str] = Field(default_factory=list)
     false_positive: bool = False
     semantic_score: float | None = None
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
+    # LLM-enriched fields (populated when allow_llm_analysis=True)
+    explanation: str | None = None
+    remediation_detail: str | None = None

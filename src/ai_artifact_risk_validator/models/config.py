@@ -67,3 +67,12 @@ class ValidatorConfig(BaseModel):
     dynamic_connection_timeout: int = Field(default=10, ge=1, le=60)
     dynamic_server_timeout: int = Field(default=30, ge=5, le=300)
     semantic: SemanticConfig = Field(default_factory=SemanticConfig)
+    # --- Network & remote scan options (opt-in, default offline-safe) ---
+    # Enable network requests: OSV.dev CVE lookup, abandoned-dep check, HTTP URL fetch
+    allow_network_requests: bool = False
+    # Enable remote artifact scanning: git URL cloning, HTTP URL download (requires git on PATH)
+    allow_remote_scan: bool = False
+    # --- LLM analysis options (opt-in, requires API subscription) ---
+    allow_llm_analysis: bool = False
+    llm_provider: str = "openai"  # openai | anthropic | nvidia
+    llm_model: str | None = None  # None = provider default

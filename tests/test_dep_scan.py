@@ -38,7 +38,7 @@ class TestScannerMetadata:
 
     def test_detected_risk_ids(self, scanner: DepScanScanner) -> None:
         risk_ids = scanner.detected_risk_ids
-        expected = ["MCP-S4", "MCP-S11", "MCP-S12", "PL-S3", "PL-S8", "SK-S7"]
+        expected = ["MCP-S4", "MCP-S11", "MCP-S12", "PL-S3", "PL-S8", "SK-S7", "DEP-S1", "DEP-S2"]
         assert set(risk_ids) == set(expected)
 
     def test_is_available_always_true(self, scanner: DepScanScanner) -> None:
@@ -330,17 +330,17 @@ class TestTyposquattingDetection:
         typo_findings = [f for f in findings if "similar to" in f.evidence.lower()]
         assert len(typo_findings) >= 1
 
-    def test_mcp_typosquat_uses_MCP_S12(self, scanner: DepScanScanner) -> None:
+    def test_mcp_typosquat_uses_DEP_S1(self, scanner: DepScanScanner) -> None:
         content = "requets==2.28.1"
         findings = scanner.scan(content, ArtifactType.MCP, "requirements.txt")
         typo_findings = [f for f in findings if "similar to" in f.evidence.lower()]
-        assert any(f.id == "MCP-S12" for f in typo_findings)
+        assert any(f.id == "DEP-S1" for f in typo_findings)
 
-    def test_plugin_typosquat_uses_PL_S8(self, scanner: DepScanScanner) -> None:
+    def test_plugin_typosquat_uses_DEP_S1(self, scanner: DepScanScanner) -> None:
         content = '{"dependencies": {"lodahs": "^4.17.21"}}'
         findings = scanner.scan(content, ArtifactType.PLUGIN, "package.json")
         typo_findings = [f for f in findings if "similar to" in f.evidence.lower()]
-        assert any(f.id == "PL-S8" for f in typo_findings)
+        assert any(f.id == "DEP-S1" for f in typo_findings)
 
 
 class TestExcessiveDependencies:

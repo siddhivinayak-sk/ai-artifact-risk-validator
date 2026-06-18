@@ -33,6 +33,9 @@ _DEFINITION_MODULES: list[str] = [
     "orchestration",
     "api_schema",
     "cross_cutting",
+    "yara_risks",
+    "taint_tracking",
+    "dep_scan_risks",
 ]
 
 

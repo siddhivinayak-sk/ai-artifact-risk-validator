@@ -28,6 +28,7 @@ from ai_artifact_risk_validator.pipeline.aggregator import Aggregator
 from ai_artifact_risk_validator.pipeline.discovery import FileDiscovery
 from ai_artifact_risk_validator.pipeline.executor import PipelineExecutor
 from ai_artifact_risk_validator.pipeline.gate import should_suppress
+from ai_artifact_risk_validator.pipeline.scorer import detect_executable_scripts
 from ai_artifact_risk_validator.reporting.generator import ReportGenerator
 from ai_artifact_risk_validator.scanners.registry import ScannerRegistry
 
@@ -189,6 +190,7 @@ class Validator:
             findings=filtered_findings,
             artifact_path=str(original_path),
             artifact_type=artifact_type,
+            has_executable_scripts=detect_executable_scripts([str(f) for f in files]),
         )
 
         logger.info(

@@ -50,6 +50,9 @@ class TestScannerMetadata:
             "PL-S9",
             "A-S3",
             "A-S7",
+            "RA-S1",
+            "RA-S2",
+            "AST-S8",
         ]
         assert set(risk_ids) == set(expected)
 
