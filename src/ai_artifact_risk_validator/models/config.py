@@ -94,3 +94,22 @@ class ValidatorConfig(BaseModel):
             ".rs",
         ]
     )
+    # --- Phase 2: Scanner false-positive reduction options ---
+    first_party_path_patterns: list[str] = Field(
+        default_factory=lambda: [
+            "tests/**",
+            "test/**",
+            "__tests__/**",
+            "spec/**",
+            ".kiro/specs/**",
+            "docs/**",
+            "doc/**",
+            "src/**",
+            "lib/**",
+        ],
+        description="Glob patterns for first-party files (provenance checks relaxed)",
+    )
+    additional_shell_executables: list[str] = Field(
+        default_factory=list,
+        description="Additional shell executable names for Command_Pattern detection",
+    )

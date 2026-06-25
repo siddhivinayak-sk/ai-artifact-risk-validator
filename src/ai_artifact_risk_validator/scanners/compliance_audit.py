@@ -13,6 +13,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+import structlog
+
 from ai_artifact_risk_validator.models import (
     ArtifactType,
     FindingLocation,
@@ -24,6 +26,8 @@ from ai_artifact_risk_validator.models import (
     SeverityLabel,
 )
 from ai_artifact_risk_validator.scanners.base import BaseScanner
+
+logger = structlog.get_logger(__name__)
 
 # ============================================================
 # License Detection Patterns (REG-2)
@@ -75,7 +79,7 @@ _REGION_PATTERN = re.compile(
     r"af-south-\d|"
     r"me-(?:south|central)-\d|"
     r"ca-central-\d|"
-    r"(?:us|eu|asia|global)(?:[-_](?:east|west|central|multi))?(?:\d)?|"
+    r"(?:us|eu|asia|apac|emea|global)(?:[-_](?:east|west|central|multi))?(?:\d)?|"
     r"(?:east|west|north|south)\s*(?:us|europe|asia)|"
     r"(?:northeurope|westeurope|eastus|westus|centralus|uksouth|ukwest|"
     r"germanywestcentral|francecentral|japaneast|australiaeast|"
@@ -110,6 +114,182 @@ _RESIDENCY_DECLARATION_PATTERN = re.compile(
     r")\s*(?:[:=]|is|declaration|policy)",
     re.IGNORECASE,
 )
+
+# ============================================================
+# Data Transfer Context Keywords (Phase 2 — REG-1 proximity check)
+# ============================================================
+
+_DATA_TRANSFER_KEYWORDS: set[str] = {
+    "transfer",
+    "transferring",
+    "transferred",
+    "replicate",
+    "replicating",
+    "replicated",
+    "replication",
+    "deploy",
+    "deploying",
+    "deployed",
+    "deployment",
+    "migrate",
+    "migrating",
+    "migrated",
+    "migration",
+    "store",
+    "storing",
+    "stored",
+    "storage",
+    "host",
+    "hosting",
+    "hosted",
+    "persist",
+    "persisting",
+    "persisted",
+    "persistence",
+    "route",
+    "routing",
+    "routed",
+    "proxy",
+    "proxied",
+    "proxying",
+    "forward",
+    "forwarding",
+    "forwarded",
+    "sync",
+    "syncing",
+    "synced",
+    "synchronize",
+    "backup",
+    "backing up",
+    "archive",
+    "archiving",
+    "archived",
+    "ship",
+    "shipping",
+    "shipped",
+    "send",
+    "sending",
+    "sent",
+    "receive",
+    "receiving",
+    "received",
+    "ingest",
+    "ingesting",
+    "ingested",
+    "land",
+    "landing",
+}
+
+# Pattern to detect region suffixes after "us" (e.g., us-east-1, us-west-2)
+_US_REGION_SUFFIX_PATTERN = re.compile(
+    r"us-(east|west|central|north|south)-\d",
+    re.IGNORECASE,
+)
+
+# Pattern to detect Markdown headings
+_MARKDOWN_HEADING_PATTERN = re.compile(r"^\s*#{1,6}\s+", re.MULTILINE)
+
+# ============================================================
+# Test Directory Pattern (Phase 2 — REG-4 confidence reduction)
+# ============================================================
+
+_TEST_DIRECTORY_PATTERN = re.compile(
+    r"(^|[\\/])(?:tests?|__tests__)[\\/]",
+    re.IGNORECASE,
+)
+
+# Pattern to detect standalone "PCI" keyword (not PCI-DSS or PCI DSS)
+_PCI_STANDALONE_PATTERN = re.compile(r"\bPCI\b(?!\s*[-\s]DSS)", re.IGNORECASE)
+
+
+def _has_transfer_context(lines: list[str], match_line_idx: int, window: int = 5) -> bool:
+    """Check if data transfer keywords exist within ±window lines.
+
+    Scans the lines surrounding the match (inclusive) for any keyword from
+    ``_DATA_TRANSFER_KEYWORDS``.  The search is case-insensitive and uses
+    simple substring matching against the joined context window.
+
+    Args:
+        lines: All lines of the artifact content.
+        match_line_idx: 0-based index of the line containing the match.
+        window: Number of lines to check above and below the match line.
+
+    Returns:
+        True if at least one data-transfer keyword appears in the window.
+    """
+    start = max(0, match_line_idx - window)
+    end = min(len(lines), match_line_idx + window + 1)
+    context = " ".join(lines[start:end]).lower()
+    return any(kw in context for kw in _DATA_TRANSFER_KEYWORDS)
+
+
+def _is_pronoun_us(text: str, match_start: int) -> bool:
+    """Determine if 'us' at the given position is the English pronoun.
+
+    Returns True (pronoun) unless the match is followed by a hyphen and a
+    region suffix (e.g., ``us-east-1``), which indicates a cloud region.
+
+    Args:
+        text: The full text being scanned.
+        match_start: Character offset where "us" starts.
+
+    Returns:
+        True if the 'us' is a pronoun (should be excluded from geo matching).
+    """
+    # Check the characters after "us" for a hyphen-region pattern
+    after = text[match_start + 2 : match_start + 20]
+    if after.startswith("-"):
+        # Could be us-east-1, us-west-2, etc.
+        candidate = text[match_start : match_start + 12]
+        if _US_REGION_SUFFIX_PATTERN.match(candidate):
+            return False  # It's a region identifier, not a pronoun
+    return True  # Lowercase "us" without region suffix → pronoun
+
+
+def _is_data_migration_heading(lines: list[str], match_line_idx: int) -> bool:
+    """Check if 'Data Migration' at the given line is a Markdown heading.
+
+    Returns True if the line is a Markdown heading (starts with one or more
+    ``#`` characters) containing 'data migration' and there is NO transfer
+    context in the body below the heading. If transfer context exists below,
+    the heading should still be treated as a genuine data residency reference.
+
+    Args:
+        lines: All lines of the artifact content.
+        match_line_idx: 0-based index of the line containing the match.
+
+    Returns:
+        True if this is a heading-only mention that should be excluded.
+    """
+    if match_line_idx >= len(lines):
+        return False
+
+    line = lines[match_line_idx]
+
+    # Must be a Markdown heading
+    if not _MARKDOWN_HEADING_PATTERN.match(line):
+        return False
+
+    # Must contain "data migration" (case-insensitive)
+    if "data migration" not in line.lower():
+        return False
+
+    # Check the body below the heading for actual transfer context.
+    # Look at lines below (up to next heading or end), within a reasonable
+    # window of 10 lines.
+    body_start = match_line_idx + 1
+    body_end = min(len(lines), match_line_idx + 11)
+    for i in range(body_start, body_end):
+        # Stop at next heading
+        if _MARKDOWN_HEADING_PATTERN.match(lines[i]):
+            break
+        lower_line = lines[i].lower()
+        for kw in _DATA_TRANSFER_KEYWORDS:
+            if kw in lower_line:
+                return False  # Transfer context exists in body → not excluded
+
+    return True  # Heading without transfer context in body → exclude
+
 
 # ============================================================
 # Retention / TTL Patterns (REG-3)
@@ -669,6 +849,11 @@ class ComplianceAuditScanner(BaseScanner):
 
         Looks for region references and data transfer patterns without
         corresponding data residency declarations.
+
+        Phase 2: After finding a geographic keyword, checks for transfer
+        context within ±5 lines before emitting a finding. Also excludes
+        lowercase "us" (English pronoun) and "Data Migration" headings
+        without transfer context.
         """
         findings: list[ScanFinding] = []
 
@@ -686,21 +871,67 @@ class ComplianceAuditScanner(BaseScanner):
             # Residency is declared, no issue
             return findings
 
-        # Found region/transfer references without residency declaration
-        match = has_region_ref or has_data_transfer
-        if match:
-            line = self._find_line_number(content, match.start())
-            if has_data_transfer:
-                evidence = (
-                    f"Cross-region data transfer reference without data residency "
-                    f"declaration: '{match.group(0)}'"
+        # Split content into lines for proximity-based checks
+        lines = content.splitlines()
+
+        # Process region references with Phase 2 context checks
+        if has_region_ref:
+            match = has_region_ref
+            matched_keyword = match.group(0)
+            match_start = match.start()
+
+            # Phase 2 check: lowercase "us" → pronoun exclusion
+            if matched_keyword.lower() == "us" and matched_keyword == "us":
+                if _is_pronoun_us(content, match_start):
+                    return findings
+
+            # Determine the 0-based line index for the match
+            match_line_idx = content[:match_start].count("\n")
+
+            # Phase 2 check: "Data Migration" heading exclusion
+            if _is_data_migration_heading(lines, match_line_idx):
+                return findings
+
+            # Phase 2 check: require transfer context within ±5 lines
+            if not _has_transfer_context(lines, match_line_idx):
+                logger.debug(
+                    "geographic_keyword_no_transfer_context",
+                    keyword=matched_keyword,
+                    line=match_line_idx,
                 )
-                confidence = 0.80
-            else:
-                evidence = (
-                    f"Cloud region reference without data residency declaration: '{match.group(0)}'"
+                return findings
+
+            # Transfer context exists → emit finding with unchanged severity
+            line = self._find_line_number(content, match_start)
+            evidence = (
+                f"Cloud region reference without data residency declaration: '{matched_keyword}'"
+            )
+            confidence = 0.70
+            findings.append(
+                self._create_finding(
+                    risk_id="REG-1",
+                    artifact_type=artifact_type,
+                    artifact_path=artifact_path,
+                    evidence=evidence,
+                    confidence=confidence,
+                    line=line,
                 )
-                confidence = 0.70
+            )
+        elif has_data_transfer:
+            match = has_data_transfer
+            match_start = match.start()
+            match_line_idx = content[:match_start].count("\n")
+
+            # Phase 2 check: "Data Migration" heading exclusion
+            if _is_data_migration_heading(lines, match_line_idx):
+                return findings
+
+            line = self._find_line_number(content, match_start)
+            evidence = (
+                f"Cross-region data transfer reference without data residency "
+                f"declaration: '{match.group(0)}'"
+            )
+            confidence = 0.80
             findings.append(
                 self._create_finding(
                     risk_id="REG-1",
@@ -767,6 +998,12 @@ class ComplianceAuditScanner(BaseScanner):
 
         Looks for PII patterns or PII handling keywords without
         corresponding consent/privacy policy references.
+
+        Phase 2 refinements:
+        - "PCI" keyword alone does not trigger REG-4; actual PII data
+          patterns (email, phone, SSN, credit card) must co-occur.
+        - Phone-number patterns in test directories get reduced confidence
+          (< 0.40) to avoid false positives on test fixture data.
         """
         findings: list[ScanFinding] = []
 
@@ -774,6 +1011,7 @@ class ComplianceAuditScanner(BaseScanner):
         has_pii_handling = _PII_HANDLING_PATTERN.search(content)
         has_pii_data = False
         pii_evidence = ""
+        pii_match_type = ""
 
         # Check for actual PII data patterns
         for pattern, pii_type in _PII_PATTERNS:
@@ -781,7 +1019,21 @@ class ComplianceAuditScanner(BaseScanner):
             if match:
                 has_pii_data = True
                 pii_evidence = f"{pii_type}: '{match.group(0)}'"
+                pii_match_type = pii_type
                 break
+
+        # Phase 2: If the PII handling match is only "PCI" keyword,
+        # require actual PII data patterns in the same file.
+        if has_pii_handling and not has_pii_data:
+            matched_text = has_pii_handling.group(0).strip()
+            if _PCI_STANDALONE_PATTERN.search(matched_text):
+                # "PCI" keyword matched but no actual PII data found — skip
+                logger.debug(
+                    "pci_keyword_without_pii_data",
+                    matched=matched_text,
+                    artifact_path=artifact_path,
+                )
+                return findings
 
         if not has_pii_handling and not has_pii_data:
             return findings
@@ -812,6 +1064,16 @@ class ComplianceAuditScanner(BaseScanner):
                 return findings
         else:
             return findings
+
+        # Phase 2: Reduce confidence for phone-number patterns in test directories
+        if pii_match_type == "phone number" and _TEST_DIRECTORY_PATTERN.search(artifact_path):
+            confidence = 0.35
+            logger.debug(
+                "pii_phone_test_directory_confidence_reduction",
+                artifact_path=artifact_path,
+                original_confidence=0.75,
+                reduced_confidence=confidence,
+            )
 
         findings.append(
             self._create_finding(

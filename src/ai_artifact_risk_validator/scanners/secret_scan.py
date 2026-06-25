@@ -11,6 +11,8 @@ import math
 import re
 from typing import Any
 
+import structlog
+
 from ai_artifact_risk_validator.models import (
     ArtifactType,
     FindingLocation,
@@ -22,6 +24,8 @@ from ai_artifact_risk_validator.models import (
     SeverityLabel,
 )
 from ai_artifact_risk_validator.scanners.base import BaseScanner
+
+logger = structlog.get_logger(__name__)
 
 # --- Risk metadata lookup ---
 # Maps risk IDs to their metadata for finding construction
@@ -366,6 +370,155 @@ _PLACEHOLDER_PATTERNS = re.compile(
     r"user@example\.com|test@test\.com|xxx+|000+|placeholder)"
 )
 
+# --- Phase 2: Hardcoded allowlists (not configurable to prevent suppression attacks) ---
+_RFC_2606_DOMAINS: frozenset[str] = frozenset(
+    {"example.com", "example.org", "example.net", "example.edu"}
+)
+
+_PLACEHOLDER_IPS: frozenset[str] = frozenset(
+    {
+        "0.0.0.0",
+        "1.2.3.4",
+        "127.0.0.1",
+        "10.0.0.1",
+        "192.168.0.1",
+        "192.168.1.1",
+        "255.255.255.255",
+    }
+)
+
+# RFC 5737 documentation address ranges
+_DOC_IP_PREFIXES: tuple[str, ...] = ("192.0.2.", "198.51.100.", "203.0.113.")
+
+# Credential patterns found in URLs that indicate genuine secrets
+_URL_CREDENTIAL_PATTERNS: re.Pattern[str] = re.compile(
+    r"(?i)(?:token=|key=|secret=|password=|bearer|api_key)"
+)
+
+
+def _is_sequential_digits(s: str) -> bool:
+    """Check if string contains ascending sequential or all-same digits.
+
+    Extracts only digit characters from the input. Returns True if:
+    - There are at least 6 digits, AND
+    - The digits form an ascending sequence (substring of "0123456789" repeated), OR
+    - All digits are the same character.
+
+    Args:
+        s: The string to check.
+
+    Returns:
+        True if the string is a sequential/repeating digit pattern.
+    """
+    digits = "".join(c for c in s if c.isdigit())
+    if len(digits) < 6:
+        return False
+    # Check ascending: substring of "01234567890123456789"
+    ascending = "0123456789" * 2
+    if digits in ascending:
+        return True
+    # Check all same digit
+    if len(set(digits)) == 1:
+        return True
+    return False
+
+
+def _is_allowlisted_secret(match_value: str, match_type: str) -> bool:
+    """Return True if the matched value is a known placeholder/documentation value.
+
+    Checks the match against hardcoded allowlists based on the type of secret
+    detected. These allowlists are intentionally not configurable to prevent
+    suppression attacks via artifact content manipulation.
+
+    Args:
+        match_value: The matched secret value (e.g., email, IP, number).
+        match_type: The type of match — one of "email", "ip_address",
+            "numeric_secret".
+
+    Returns:
+        True if the value is a known placeholder that should be excluded
+        from secret detection.
+    """
+    if match_type == "email":
+        domain = match_value.split("@")[-1].lower()
+        return any(domain == d or domain.endswith("." + d) for d in _RFC_2606_DOMAINS)
+    if match_type == "ip_address":
+        if match_value in _PLACEHOLDER_IPS:
+            return True
+        if any(match_value.startswith(p) for p in _DOC_IP_PREFIXES):
+            return True
+        return False
+    if match_type == "numeric_secret":
+        return _is_sequential_digits(match_value)
+    return False
+
+
+def _is_url_without_credentials(url: str) -> bool:
+    """Check if a URL does NOT contain credential patterns.
+
+    Returns True if the URL is just a plain service link without embedded
+    tokens, keys, secrets, passwords, or bearer tokens — indicating it
+    should not be flagged as an embedded secret.
+
+    Args:
+        url: The URL string to check.
+
+    Returns:
+        True if the URL has no credential patterns (safe to skip).
+        False if credential patterns are found (should be flagged).
+    """
+    return _URL_CREDENTIAL_PATTERNS.search(url) is None
+
+
+# --- Phase 2: ECR registry and test directory patterns ---
+_ECR_PATTERN: re.Pattern[str] = re.compile(r"\d+\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com")
+
+_TEST_DIR_PATTERN: re.Pattern[str] = re.compile(r"(^|[\\/])tests?[\\/]|[\\/]\.qa[\\/]")
+
+_DOC_OR_CI_PATH_PATTERN: re.Pattern[str] = re.compile(
+    r"(?i)(^|[\\/])(?:docs?|documentation|\.github|\.gitlab-ci|ci|\.circleci)[\\/]"
+    r"|(?:README|CHANGELOG|CONTRIBUTING|\.ya?ml$|Dockerfile)"
+)
+
+# Key=value pattern for credential-like formats
+_KEY_VALUE_PATTERN: re.Pattern[str] = re.compile(
+    r"(?i)(?:key|token|secret|password|credential|api_key|apikey|auth)\s*[=:]"
+)
+
+
+def _is_documentation_or_ci_path(artifact_path: str) -> bool:
+    """Check if the file path is a documentation or CI/CD configuration file.
+
+    Args:
+        artifact_path: The file path to check.
+
+    Returns:
+        True if the path is under a documentation directory or is a CI config file.
+    """
+    return _DOC_OR_CI_PATH_PATTERN.search(artifact_path) is not None
+
+
+def _looks_like_real_credential(match_value: str) -> bool:
+    """Check if a match value looks like a real credential.
+
+    Used for stricter validation in test directories — only flag matches
+    that have high entropy or are in key=value format.
+
+    Args:
+        match_value: The matched secret value to validate.
+
+    Returns:
+        True if the value looks like a genuine credential.
+    """
+    # Check for key=value format in the surrounding context
+    if _KEY_VALUE_PATTERN.search(match_value):
+        return True
+    # Check for high entropy (strong indicator of real secret)
+    entropy = _calculate_shannon_entropy(match_value)
+    if entropy >= _ENTROPY_THRESHOLD:
+        return True
+    return False
+
 
 def _is_entropy_false_positive(candidate: str, line: str) -> bool:
     """Return True if the high-entropy *candidate* is a likely false positive.
@@ -545,6 +698,29 @@ class SecretScanScanner(BaseScanner):
             return _ARTIFACT_PII_RISK_MAP[artifact_type]
         return _ARTIFACT_RISK_MAP.get(artifact_type, "P-S3")
 
+    @staticmethod
+    def _classify_pii_match_type(pattern_name: str) -> str:
+        """Classify a PII pattern name into a match type for allowlist checks.
+
+        Maps PII pattern names (e.g., "Email Address", "IP Address") to the
+        match type strings expected by _is_allowlisted_secret().
+
+        Args:
+            pattern_name: The name from the PII patterns list.
+
+        Returns:
+            One of "email", "ip_address", "numeric_secret", or "other".
+        """
+        name_lower = pattern_name.lower()
+        if "email" in name_lower:
+            return "email"
+        if "ip" in name_lower:
+            return "ip_address"
+        # SSNs, phone numbers, and credit cards are NOT numeric_secret —
+        # they are distinct PII patterns that should not be filtered by
+        # the sequential digit allowlist.
+        return "other"
+
     def _create_finding(
         self,
         risk_id: str,
@@ -605,6 +781,12 @@ class SecretScanScanner(BaseScanner):
     ) -> list[ScanFinding]:
         """Scan content using regex patterns for known secret formats.
 
+        Applies Phase 2 allowlist filtering before emitting findings:
+        - Allowlisted secrets (RFC 2606, placeholder IPs, sequential digits) skipped
+        - URLs without credentials skipped
+        - ECR registry URLs in doc/CI files get reduced confidence
+        - Test directory matches require high-entropy or key=value format
+
         Args:
             content: Artifact content to scan.
             artifact_type: Type of artifact.
@@ -619,8 +801,23 @@ class SecretScanScanner(BaseScanner):
         for pattern_name, pattern, confidence in _SECRET_PATTERNS:
             for line_num, line in enumerate(lines, start=1):
                 for match in pattern.finditer(line):
-                    risk_id = self._get_risk_id(artifact_type, is_pii=False)
                     evidence = match.group(0)
+
+                    # Phase 2: ECR registry URL check — reduce confidence in doc/CI
+                    if _ECR_PATTERN.search(evidence):
+                        if _is_documentation_or_ci_path(artifact_path):
+                            confidence = 0.45
+                            # ECR URLs in doc/CI without credentials: emit at
+                            # reduced confidence rather than skipping entirely
+                        elif _is_url_without_credentials(evidence):
+                            logger.debug(
+                                "allowlisted_secret_exclusion",
+                                value=evidence[:40],
+                                type="ecr_url_no_credentials",
+                            )
+                            continue
+
+                    risk_id = self._get_risk_id(artifact_type, is_pii=False)
                     findings.append(
                         self._create_finding(
                             risk_id=risk_id,
@@ -653,6 +850,7 @@ class SecretScanScanner(BaseScanner):
         """
         findings: list[ScanFinding] = []
         high_entropy_strings = _find_high_entropy_strings(content)
+        is_test_path = _TEST_DIR_PATTERN.search(artifact_path) is not None
 
         for candidate, entropy, line_num in high_entropy_strings:
             # Skip if already caught by regex patterns
@@ -662,6 +860,15 @@ class SecretScanScanner(BaseScanner):
                     already_found = True
                     break
             if already_found:
+                continue
+
+            # Phase 2: Test directory stricter validation
+            if is_test_path and not _looks_like_real_credential(candidate):
+                logger.debug(
+                    "allowlisted_secret_exclusion",
+                    value=candidate[:40],
+                    type="test_dir_low_confidence",
+                )
                 continue
 
             risk_id = self._get_risk_id(artifact_type, is_pii=False)
@@ -692,6 +899,7 @@ class SecretScanScanner(BaseScanner):
         """Scan content for personally identifiable information.
 
         Uses built-in PII regex patterns and optionally presidio-analyzer.
+        Applies Phase 2 allowlist filtering for known placeholder emails/IPs.
 
         Args:
             content: Artifact content to scan.
@@ -703,18 +911,56 @@ class SecretScanScanner(BaseScanner):
         """
         findings: list[ScanFinding] = []
         lines = content.splitlines()
+        is_test_path = _TEST_DIR_PATTERN.search(artifact_path) is not None
 
         # Built-in PII regex detection
         for pattern_name, pattern, confidence in _PII_PATTERNS:
             for line_num, line in enumerate(lines, start=1):
                 for match in pattern.finditer(line):
+                    match_value = match.group(0)
+
+                    # Phase 2: Determine match type and check allowlist
+                    match_type = self._classify_pii_match_type(pattern_name)
+                    if _is_allowlisted_secret(match_value, match_type):
+                        logger.debug(
+                            "allowlisted_secret_exclusion",
+                            value=match_value[:40],
+                            type=match_type,
+                        )
+                        continue
+
+                    # Phase 2: Sequential digit check for purely numeric PII matches
+                    # Patterns like Phone Number and Credit Card can match purely
+                    # numeric sequential or repeating digits (e.g. "0123456789",
+                    # "345678901234567", "1111111111") which are test/placeholder
+                    # data, not genuine PII. Only apply to values that are purely
+                    # digit characters (no dashes, spaces, or formatting — those
+                    # indicate real formatted PII like SSNs).
+                    if match_value.isdigit() and _is_sequential_digits(match_value):
+                        logger.debug(
+                            "allowlisted_secret_exclusion",
+                            value=match_value[:40],
+                            type="sequential_digits_pii",
+                        )
+                        continue
+
+                    # Phase 2: Test directory stricter validation for emails/IPs
+                    if is_test_path and match_type in ("email", "ip_address", "numeric_secret"):
+                        if not _looks_like_real_credential(match_value):
+                            logger.debug(
+                                "allowlisted_secret_exclusion",
+                                value=match_value[:40],
+                                type="test_dir_low_confidence",
+                            )
+                            continue
+
                     risk_id = self._get_risk_id(artifact_type, is_pii=True)
                     findings.append(
                         self._create_finding(
                             risk_id=risk_id,
                             artifact_type=artifact_type,
                             artifact_path=artifact_path,
-                            evidence=match.group(0),
+                            evidence=match_value,
                             confidence=confidence,
                             line=line_num,
                             pattern_name=f"PII: {pattern_name}",

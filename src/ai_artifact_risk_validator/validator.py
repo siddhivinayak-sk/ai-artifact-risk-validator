@@ -97,6 +97,12 @@ class Validator:
         # Configure DynamicScanner with allow_dynamic_scan and interactive settings
         self._configure_dynamic_scanner()
 
+        # Configure CodeAuditScanner with additional shell executables
+        self._configure_code_audit_scanner()
+
+        # Configure ProvenanceChkScanner with first-party path patterns
+        self._configure_provenance_chk_scanner()
+
     def verify(self, path: str | Path) -> ScanReport:
         """Scan the given path for AI artifact risks.
 
@@ -595,6 +601,32 @@ class Validator:
                 connection_timeout=self._config.dynamic_connection_timeout,
                 per_server_timeout=self._config.dynamic_server_timeout,
             )
+
+    def _configure_code_audit_scanner(self) -> None:
+        """Configure CodeAuditScanner with additional shell executables from config.
+
+        Merges any user-specified shell executable names with the built-in defaults
+        so that Command_Pattern detection recognizes custom executables.
+        """
+        from ai_artifact_risk_validator.models.enums import ScannerModule
+        from ai_artifact_risk_validator.scanners.code_audit import CodeAuditScanner
+
+        scanner = self._scanner_registry.get_scanner_by_name(ScannerModule.CODE_AUDIT)
+        if scanner is not None and isinstance(scanner, CodeAuditScanner):
+            scanner.configure(self._config.additional_shell_executables)
+
+    def _configure_provenance_chk_scanner(self) -> None:
+        """Configure ProvenanceChkScanner with first-party path patterns from config.
+
+        Passes the user-specified first-party path glob patterns to the scanner
+        so it can skip provenance/integrity checks for matching file paths.
+        """
+        from ai_artifact_risk_validator.models.enums import ScannerModule
+        from ai_artifact_risk_validator.scanners.provenance_chk import ProvenanceChkScanner
+
+        scanner = self._scanner_registry.get_scanner_by_name(ScannerModule.PROVENANCE_CHK)
+        if scanner is not None and isinstance(scanner, ProvenanceChkScanner):
+            scanner.set_first_party_patterns(self._config.first_party_path_patterns)
 
     def _error_report(
         self, artifact_path: str, error_message: str, scan_id: str | None = None

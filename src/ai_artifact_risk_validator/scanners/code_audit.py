@@ -980,6 +980,58 @@ def _is_python_content(content: str, artifact_path: str) -> bool:
     return indicator_count >= 2
 
 
+# --- Inline code span classification constants (Phase 2) ---
+
+_KNOWN_SHELL_EXECUTABLES: set[str] = {
+    "rm",
+    "ls",
+    "cat",
+    "cp",
+    "mv",
+    "chmod",
+    "chown",
+    "curl",
+    "wget",
+    "git",
+    "docker",
+    "kubectl",
+    "sudo",
+    "kill",
+    "pkill",
+    "find",
+    "grep",
+    "sed",
+    "awk",
+    "tar",
+    "zip",
+    "unzip",
+    "ssh",
+    "scp",
+    "nc",
+    "nmap",
+    "python",
+    "ruby",
+    "node",
+    "bash",
+    "sh",
+    "cmd",
+    "powershell",
+    "pwsh",
+}
+
+_SHELL_METACHARACTERS: set[str] = {
+    "|",
+    ">",
+    "<",
+    "&&",
+    "||",
+    ";",
+    "$(",
+    ">>",
+    "2>&1",
+}
+
+
 class CodeAuditScanner(BaseScanner):
     """Scanner for detecting code security risks in AI artifacts.
 
@@ -1006,6 +1058,19 @@ class CodeAuditScanner(BaseScanner):
         self._rust_analyzer = RustAnalyzer()
         self._java_analyzer = JavaAnalyzer()
         self._generic_scanner = GenericLanguageScanner()
+        self._shell_executables: set[str] = _KNOWN_SHELL_EXECUTABLES
+
+    def configure(self, additional_shell_executables: list[str]) -> None:
+        """Merge additional shell executables from config with defaults.
+
+        Called post-init by the Validator to apply ValidatorConfig settings.
+
+        Args:
+            additional_shell_executables: Extra executable names to add to the
+                known set for Command_Pattern detection.
+        """
+        if additional_shell_executables:
+            self._shell_executables = _KNOWN_SHELL_EXECUTABLES | set(additional_shell_executables)
 
     @property
     def name(self) -> ScannerModule:
@@ -1115,6 +1180,48 @@ class CodeAuditScanner(BaseScanner):
             remediation=metadata["remediation"],
             references=[],
         )
+
+    def _is_inline_code_span(self, backtick_content: str) -> bool:
+        """Determine if backtick content is a Markdown inline code span.
+
+        Returns True if the content appears to be Markdown inline code formatting
+        (identifier, filename, dotted path, etc.) rather than a shell command.
+
+        Logic:
+        1. Empty content → True (inline code)
+        2. Very long content (>1000 chars) → True (real commands are short)
+        3. Contains shell metacharacters → False (likely command)
+        4. First token is a known shell executable AND 2+ tokens → False (command)
+        5. Otherwise → True (inline code)
+
+        Args:
+            backtick_content: The text content between the backticks.
+
+        Returns:
+            True if the content is Markdown inline code, not a command.
+        """
+        content = backtick_content.strip()
+
+        # Edge case: empty content
+        if not content:
+            return True
+
+        # Edge case: very long content (>1000 chars) → treat as inline code
+        if len(content) > 1000:
+            return True
+
+        # Check for shell metacharacters → likely command execution
+        for meta in _SHELL_METACHARACTERS:
+            if meta in content:
+                return False
+
+        # Check for command pattern: first token is a known shell executable
+        tokens = content.split()
+        if len(tokens) >= 2 and tokens[0].lower() in self._shell_executables:
+            return False
+
+        # Single word, dotted path, filename, camelCase, snake_case → inline code
+        return True
 
     def _scan_python_ast(
         self,
@@ -1455,6 +1562,19 @@ class CodeAuditScanner(BaseScanner):
                     )
             else:
                 for match in _RE_BACKTICK_EXEC.finditer(line):
+                    # Phase 2: Check if content is inline code span
+                    matched_content = match.group(1) if match.group(1) else match.group(0)
+                    # Strip surrounding backticks to get the inner content
+                    inner_content = matched_content.strip("`")
+                    if self._is_inline_code_span(inner_content):
+                        logger.debug(
+                            "inline_code_span_exclusion",
+                            content=inner_content,
+                            line_num=line_num,
+                            artifact_path=artifact_path,
+                        )
+                        continue
+
                     risk_id = _SUBPROCESS_RISK_MAP.get(artifact_type, "MCP-S1")
                     findings.append(
                         self._create_finding(

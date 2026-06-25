@@ -41,6 +41,24 @@ logger = get_logger(__name__)
 # Minimum score threshold for a valid classification
 _CLASSIFICATION_THRESHOLD: float = 0.3
 
+# Pre-compiled regex patterns for detecting test file paths
+_TEST_PATH_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"(^|[\\/])tests?[\\/]"),
+    re.compile(r"(^|[\\/])__tests__[\\/]"),
+    re.compile(r"(^|[\\/])spec[\\/]"),
+    re.compile(r"test_[^/\\]+\.py$"),
+    re.compile(r"[^/\\]+_test\.py$"),
+]
+
+# Pre-compiled regex for YAML frontmatter with type or artifact_type field
+_FRONTMATTER_TYPE_RE: re.Pattern[str] = re.compile(
+    r"^---\s*\n(?:.*\n)*?\s*(?:type|artifact_type)\s*:.*\n(?:.*\n)*?---",
+    re.MULTILINE,
+)
+
+# Pre-compiled regex for artifact_type comment line
+_ARTIFACT_TYPE_COMMENT_RE: re.Pattern[str] = re.compile(r"^\s*#\s*artifact_type\s*:", re.MULTILINE)
+
 # Weight allocated to the semantic signal (taken from content weight)
 _SEMANTIC_WEIGHT: float = 0.10
 
@@ -391,6 +409,47 @@ class ArtifactClassifier:
             logger.debug("Semantic classification failed", artifact_type=artifact_type.value)
             return 0.0
 
+    def _is_test_file(self, path: str) -> bool:
+        """Check if a file path matches test directory or test file patterns.
+
+        Args:
+            path: File path string to check against test patterns.
+
+        Returns:
+            True if the path matches any test file pattern.
+        """
+        for pattern in _TEST_PATH_PATTERNS:
+            if pattern.search(path):
+                return True
+        return False
+
+    def _has_explicit_artifact_metadata(self, content: str) -> bool:
+        """Check if file content contains explicit artifact metadata markers.
+
+        Looks for:
+        - YAML frontmatter (between ``---`` markers) containing a ``type:``
+          or ``artifact_type:`` field
+        - A comment line matching ``# artifact_type:`` pattern
+
+        Args:
+            content: File content to inspect.
+
+        Returns:
+            True if any artifact metadata marker is found.
+        """
+        if not content:
+            return False
+
+        # Check for YAML frontmatter with type/artifact_type field
+        if _FRONTMATTER_TYPE_RE.search(content):
+            return True
+
+        # Check for # artifact_type: comment line
+        if _ARTIFACT_TYPE_COMMENT_RE.search(content):
+            return True
+
+        return False
+
     def classify_script(
         self,
         file_path: Path,
@@ -400,6 +459,7 @@ class ArtifactClassifier:
         """Classify a script file using multi-layered signals.
 
         Classification precedence (highest to lowest):
+        0. Test file exclusion (early exit if test path without metadata)
         1. Known AI Directory detection (path signal, weight 0.35)
         2. Type-Indicating Directory (path signal, weight 0.35)
         3. Reference resolution (referenced_scripts context)
@@ -419,6 +479,16 @@ class ArtifactClassifier:
             ClassificationResult with artifact_type and confidence, or None
             if no signal produces a score above the classification threshold.
         """
+        # Phase 2: Test file exclusion — check BEFORE all other classification signals
+        normalized_path = file_path.as_posix()
+        if self._is_test_file(normalized_path):
+            file_content = content if content is not None else self._read_file_content(file_path)
+            if file_content is None or not self._has_explicit_artifact_metadata(file_content):
+                logger.debug("test_file_classification_exclusion", path=normalized_path)
+                return None
+            # Has explicit metadata → proceed with normal classification
+            # (the metadata will be picked up by existing classification logic)
+
         from .script_patterns import (
             KNOWN_AI_DIRECTORIES,
             TYPE_INDICATING_DIRS,
