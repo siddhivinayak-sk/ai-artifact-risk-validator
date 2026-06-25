@@ -31,6 +31,8 @@ _EXTENSION_MAP: dict[str, DetectedLanguage] = {
     ".rb": DetectedLanguage.RUBY,
     ".cs": DetectedLanguage.CSHARP,
     ".php": DetectedLanguage.PHP,
+    ".md": DetectedLanguage.MARKDOWN,
+    ".mdx": DetectedLanguage.MARKDOWN,
 }
 
 # --- Content markers for language detection ---

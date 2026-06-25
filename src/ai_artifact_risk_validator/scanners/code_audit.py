@@ -361,7 +361,10 @@ _YAML_UNSAFE_LOAD = ("yaml", "load")
 # --- Regex patterns for non-Python (regex-based) detection ---
 
 # Dangerous function call patterns (generic)
-_RE_DANGEROUS_FUNCS = re.compile(r"\b(eval|exec|compile|__import__)\s*\(", re.IGNORECASE)
+# Excludes re.compile, Path(), and open() which are safe standard library usage
+_RE_DANGEROUS_FUNCS = re.compile(
+    r"(?<!\w\.)(?<!re\.)\b(eval|exec|compile|__import__)\s*\(", re.IGNORECASE
+)
 
 # Subprocess / shell command patterns
 _RE_SUBPROCESS = re.compile(
@@ -1190,9 +1193,11 @@ class CodeAuditScanner(BaseScanner):
         Logic:
         1. Empty content → True (inline code)
         2. Very long content (>1000 chars) → True (real commands are short)
-        3. Contains shell metacharacters → False (likely command)
-        4. First token is a known shell executable AND 2+ tokens → False (command)
-        5. Otherwise → True (inline code)
+        3. Looks like a type annotation, path template, or identifier → True
+        4. Contains shell metacharacters → False (likely command)
+        5. First token is a known shell executable AND 2+ tokens → False (command)
+        6. Starts with a number or numbered-list-like pattern → True (spec prose)
+        7. Otherwise → True (inline code)
 
         Args:
             backtick_content: The text content between the backticks.
@@ -1208,6 +1213,55 @@ class CodeAuditScanner(BaseScanner):
 
         # Edge case: very long content (>1000 chars) → treat as inline code
         if len(content) > 1000:
+            return True
+
+        # Phase 2 FP reduction: Detect common inline code patterns that are NOT commands
+
+        # Type annotations: "str | None", "list[str]", "dict[str, Any]", "Optional[X]"
+        if re.match(
+            r"^[A-Za-z_]\w*(?:\s*\|\s*[A-Za-z_]\w*)*(?:\[.*\])?"
+            r"(?:\s*\|\s*[A-Za-z_]\w*(?:\[.*\])?)*"
+            r"(?:\s*=\s*\S+)?$",
+            content,
+        ):
+            return True
+
+        # Variable declarations / assignments: "spec_name: str | None = None"
+        if re.match(r"^[A-Za-z_]\w*\s*:\s*\S", content):
+            return True
+
+        # Template placeholders with angle brackets: "<spec-name>/R<n> AC<m>",
+        # "<spec-name>", "str | None". Angle brackets used as placeholders are
+        # NOT shell redirection operators.
+        if re.search(r"<[A-Za-z_]\w*(?:[-_]\w+)*>", content):
+            return True
+
+        # Path-like templates: "src/sops/", ".kiro/steering/", "--channel kiro-ide"
+        if re.match(r"^[<.\w][\w\-<>/\\.*{}]+$", content):
+            return True
+
+        # Dotted identifiers: "module.function", "os.path.join"
+        if re.match(r"^[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+$", content):
+            return True
+
+        # Quoted strings: '"<spec_name>/R<req_num> AC<ac_num>"'
+        if content.startswith('"') and content.endswith('"'):
+            return True
+
+        # Bold/emphasis markdown inside backticks: "**Validates: ...**"
+        if content.startswith("**") or content.startswith("__"):
+            return True
+
+        # Filenames with extensions: "conftest.py", "mcp.json", "bob.yaml"
+        if re.match(r"^[\w\-./\\]+\.\w{1,10}$", content):
+            return True
+
+        # Flag/option patterns: "--channel", "--validate", "-rf"
+        if content.startswith("-") and not any(meta in content for meta in _SHELL_METACHARACTERS):
+            return True
+
+        # Numbered/structured requirements (starts with digit): "1. THE ...", "R<n>"
+        if re.match(r"^\d+\.\s+", content):
             return True
 
         # Check for shell metacharacters → likely command execution
@@ -1695,6 +1749,148 @@ class CodeAuditScanner(BaseScanner):
         log.debug("Destructive keyword excluded: prose context detected")
         return False
 
+    def _scan_markdown(
+        self,
+        content: str,
+        artifact_type: ArtifactType,
+        artifact_path: str,
+    ) -> list[ScanFinding]:
+        """Perform targeted scanning on Markdown documents.
+
+        Markdown files (requirements, design docs, SOPs, specs) are primarily
+        prose with inline code spans and fenced code blocks. Applies:
+        1. Shell command detection in backtick spans (via _is_inline_code_span filter)
+        2. Fenced code blocks: dangerous patterns (subprocess, encoded-exec, dangerous funcs)
+        3. Destructive keyword detection with code-context filtering
+        4. Skip broad regex patterns (_RE_DANGEROUS_FUNCS) on prose lines outside code blocks
+
+        This avoids the massive FP rate from applying broad regex patterns
+        to prose content while still detecting genuine risks.
+
+        Args:
+            content: Markdown file content.
+            artifact_type: Type of artifact.
+            artifact_path: Path to the artifact.
+
+        Returns:
+            List of findings from targeted markdown analysis.
+        """
+        findings: list[ScanFinding] = []
+        lines = content.splitlines()
+        fence_tracker = MarkdownFenceTracker(lines)
+
+        for line_num, line in enumerate(lines, start=1):
+            # Inside fenced code blocks: apply focused regex patterns
+            if fence_tracker.is_in_fence(line_num):
+                # Dangerous function calls (eval, exec, compile, __import__)
+                for match in _RE_DANGEROUS_FUNCS.finditer(line):
+                    risk_id = _DANGEROUS_FUNC_RISK_MAP.get(artifact_type, "SK-S2")
+                    findings.append(
+                        self._create_finding(
+                            risk_id=risk_id,
+                            artifact_type=artifact_type,
+                            artifact_path=artifact_path,
+                            evidence=match.group(0).strip(),
+                            confidence=0.80,
+                            line=line_num,
+                            detail=f"Dangerous function in code block: {match.group(1)}()",
+                        )
+                    )
+
+                # Subprocess/shell command execution
+                for match in _RE_SUBPROCESS.finditer(line):
+                    risk_id = _SUBPROCESS_RISK_MAP.get(artifact_type, "MCP-S1")
+                    findings.append(
+                        self._create_finding(
+                            risk_id=risk_id,
+                            artifact_type=artifact_type,
+                            artifact_path=artifact_path,
+                            evidence=match.group(0).strip(),
+                            confidence=0.80,
+                            line=line_num,
+                            detail=f"Command execution in code block: {match.group(0).strip()}",
+                        )
+                    )
+
+                # Encoded execution chains in code blocks
+                for match in _RE_ENCODED_EXEC.finditer(line):
+                    findings.append(
+                        self._create_finding(
+                            risk_id="AST-S8",
+                            artifact_type=artifact_type,
+                            artifact_path=artifact_path,
+                            evidence=line.strip()[:200],
+                            confidence=0.90,
+                            line=line_num,
+                            detail="Encoded payload execution chain in code block",
+                        )
+                    )
+
+                # Destructive keywords in code blocks always have code context
+                for match in _RE_DESTRUCTIVE_KEYWORDS.finditer(line):
+                    keyword = match.group(1)
+                    risk_id = _DESTRUCTIVE_OP_RISK_MAP.get(artifact_type, "A-S6")
+                    findings.append(
+                        self._create_finding(
+                            risk_id=risk_id,
+                            artifact_type=artifact_type,
+                            artifact_path=artifact_path,
+                            evidence=match.group(0).strip()[:100],
+                            confidence=0.85,
+                            line=line_num,
+                            detail=f"Destructive operation in code block: {keyword}",
+                        )
+                    )
+
+            elif not fence_tracker.is_fence_boundary(line_num):
+                # Outside code blocks: backtick command execution with inline filter
+                for match in _RE_BACKTICK_EXEC.finditer(line):
+                    matched_content = match.group(1) if match.group(1) else match.group(0)
+                    inner_content = matched_content.strip("`")
+                    if self._is_inline_code_span(inner_content):
+                        logger.debug(
+                            "markdown_inline_code_span_exclusion",
+                            content=inner_content[:50],
+                            line_num=line_num,
+                            artifact_path=artifact_path,
+                        )
+                        continue
+
+                    risk_id = _SUBPROCESS_RISK_MAP.get(artifact_type, "MCP-S1")
+                    findings.append(
+                        self._create_finding(
+                            risk_id=risk_id,
+                            artifact_type=artifact_type,
+                            artifact_path=artifact_path,
+                            evidence=match.group(0).strip()[:100],
+                            confidence=0.80,
+                            line=line_num,
+                            detail=(
+                                "Backtick command execution detected: "
+                                f"{match.group(0).strip()[:50]}"
+                            ),
+                        )
+                    )
+
+                # Destructive keywords with code-context filter (same as _scan_regex)
+                for match in _RE_DESTRUCTIVE_KEYWORDS.finditer(line):
+                    keyword = match.group(1)
+                    if self._has_code_context(keyword, line, line_num, fence_tracker):
+                        risk_id = _DESTRUCTIVE_OP_RISK_MAP.get(artifact_type, "A-S6")
+                        findings.append(
+                            self._create_finding(
+                                risk_id=risk_id,
+                                artifact_type=artifact_type,
+                                artifact_path=artifact_path,
+                                evidence=match.group(0).strip()[:100],
+                                confidence=0.88,
+                                line=line_num,
+                                detail=f"Destructive operation detected: {keyword}",
+                            )
+                        )
+
+        return findings
+
     def _scan_rogue_agent(
         self,
         artifact_content: str,
@@ -1823,6 +2019,11 @@ class CodeAuditScanner(BaseScanner):
                         artifact_content, language, artifact_type, artifact_path
                     )
                 )
+            case DetectedLanguage.MARKDOWN:
+                # Markdown files get only targeted scanning: backtick execution
+                # detection (with inline code span filtering) and encoded-exec.
+                # Skip broad regex patterns that produce excessive FPs on prose.
+                findings.extend(self._scan_markdown(artifact_content, artifact_type, artifact_path))
             case _:
                 # UNKNOWN language: apply regex patterns with confidence forced to 0.60
                 regex_findings = self._scan_regex(artifact_content, artifact_type, artifact_path)

@@ -20,4 +20,5 @@ class DetectedLanguage(str, Enum):
     RUBY = "ruby"
     CSHARP = "csharp"
     PHP = "php"
+    MARKDOWN = "markdown"
     UNKNOWN = "unknown"
