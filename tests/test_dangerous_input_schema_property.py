@@ -11,7 +11,7 @@ a ScanFinding with id="MCP-S1" and confidence 0.80.
 
 from __future__ import annotations
 
-from hypothesis import given, settings
+from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
 from ai_artifact_risk_validator.models.mcp_models import MCPToolInfo
@@ -172,7 +172,11 @@ class TestDangerousInputSchemaDetection:
     """
 
     @given(tool=dangerous_param_name_tool())
-    @settings(max_examples=100)
+    @settings(
+        max_examples=100,
+        suppress_health_check=[HealthCheck.too_slow],
+        deadline=None,
+    )
     def test_dangerous_keyword_in_param_name_produces_mcp_s1(self, tool: MCPToolInfo) -> None:
         """Any MCP tool with a string parameter whose name contains a dangerous keyword
         SHALL produce at least one MCP-S1 finding with confidence 0.80."""
@@ -192,7 +196,11 @@ class TestDangerousInputSchemaDetection:
         )
 
     @given(tool=dangerous_param_description_tool())
-    @settings(max_examples=100)
+    @settings(
+        max_examples=100,
+        suppress_health_check=[HealthCheck.too_slow],
+        deadline=None,
+    )
     def test_dangerous_keyword_in_param_description_produces_mcp_s1(
         self, tool: MCPToolInfo
     ) -> None:

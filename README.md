@@ -17,6 +17,7 @@ A comprehensive Python package that validates AI artifacts for security, perform
 - [Configuration](#configuration)
 - [API Reference](#api-reference)
 - [Scanner Modules](#scanner-modules)
+- [Script File Scanning](#script-file-scanning)
 - [Risk Framework Reference](#risk-framework-reference)
 - [Contributing](#contributing)
 
@@ -1191,6 +1192,119 @@ Or load from a plugin directory:
 ```python
 config = ValidatorConfig(custom_plugin_dirs=["./my-scanners"])
 ```
+
+---
+
+## Script File Scanning
+
+The validator detects and scans **script files** that are demonstrably related to AI tool ecosystems. Scripts in known AI directories, referenced by AI artifacts, or part of MCP server projects are automatically classified and run through the full scanner pipeline.
+
+### Supported Languages
+
+| Language | Extensions |
+|----------|-----------|
+| Python | `.py` |
+| TypeScript | `.ts` |
+| JavaScript | `.js` |
+| PowerShell | `.ps1` |
+| Shell | `.sh` |
+| Bash | `.bash` |
+| Batch | `.bat` |
+| CMD | `.cmd` |
+| Ruby | `.rb` |
+| Java | `.java` |
+| Kotlin | `.kt` |
+| Rust | `.rs` |
+
+### Multi-Layered Classification (Order of Precedence)
+
+Script files are classified using a multi-layered approach. Each layer independently exceeds the classification threshold (0.30), so a single match is sufficient:
+
+1. **Known AI Directories** — Scripts residing under recognized AI tool directories are classified by their parent directory structure:
+   - `.kiro/` — subdirectory-specific: `hooks/` → HOOK, `skills/` → SKILL, `steering/` → STEERING, `specs/` → INSTRUCTION; default → INSTRUCTION
+   - `.github/copilot/` → INSTRUCTION
+   - `.claude/` → INSTRUCTION
+   - `.cursor/` → INSTRUCTION
+   - `.continue/` → PLUGIN
+   - `.codeium/` → PLUGIN
+   - `.tabnine/` → PLUGIN
+
+2. **Type-Indicating Directories** — Scripts in directories whose names match artifact types (case-insensitive):
+   - `skills/` or segments matching `skill` → SKILL
+   - `hooks/` or `.hooks/` → HOOK
+   - `mcp-servers/`, `mcp/`, or segments matching `mcp-server` → MCP
+   - `plugins/` or `extensions/` → PLUGIN
+   - `agents/` → AGENT
+
+3. **Reference Resolution** — Scripts explicitly referenced by classified AI artifacts (in `command`, `args`, `main`, `activate`, `scripts`, or `script` fields) inherit their referencing artifact's type.
+
+4. **MCP Server Project Detection** — Directories containing build markers (`package.json`, `pyproject.toml`, `setup.py`, `Cargo.toml`, `build.gradle`, `build.gradle.kts`, `pom.xml`) with MCP SDK dependencies classify all scripts within as MCP. Supported indicators:
+   - Python: `mcp`, `fastmcp`, `modelcontextprotocol`
+   - JavaScript/TypeScript: `@modelcontextprotocol/sdk`, `mcp-server`
+   - Java/Kotlin: `io.modelcontextprotocol`, `mcp-sdk`, `modelcontextprotocol`
+   - Rust: `mcp-sdk`, `mcp-server`, `modelcontextprotocol`
+
+5. **Sibling Artifact Classification** — Scripts co-located with already-classified AI artifacts inherit the sibling's type (non-transitive; only files classified through non-sibling signals act as sources).
+
+### False Positive Prevention
+
+Scripts that do not match any of the above criteria are **not scanned**. The extension signal alone (weight 0.30) does not exceed the classification threshold, so arbitrary repository code remains untouched. Only scripts with demonstrated AI-tool relevance enter the scanning pipeline.
+
+### Configuration
+
+Two settings control script scanning behavior in `ValidatorConfig` and `.aav.yaml`:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `script_scanning_enabled` | `bool` | `true` | Enable/disable all script classification and scanning |
+| `script_extensions` | `list[str]` | See below | File extensions recognized as scripts |
+
+Default `script_extensions`:
+```
+[".py", ".ts", ".js", ".ps1", ".sh", ".bash", ".bat", ".cmd", ".rb", ".java", ".kt", ".rs"]
+```
+
+#### Example: Disable script scanning
+
+```yaml
+# .aav.yaml
+script_scanning_enabled: false
+```
+
+#### Example: Add or remove extensions
+
+```yaml
+# .aav.yaml — scan Go and PHP files, skip Ruby
+script_extensions:
+  - ".py"
+  - ".ts"
+  - ".js"
+  - ".ps1"
+  - ".sh"
+  - ".bash"
+  - ".bat"
+  - ".cmd"
+  - ".java"
+  - ".kt"
+  - ".rs"
+  - ".go"
+  - ".php"
+```
+
+### Custom Directory Patterns
+
+Operators can extend the Known AI Directories recognized by the classifier using the existing `custom_artifact_patterns` configuration in `.aav.yaml`:
+
+```yaml
+# .aav.yaml — treat .my-ai-tool/ as an AI directory
+custom_artifact_patterns:
+  instruction:
+    - ".my-ai-tool/**"
+  plugin:
+    - ".custom-plugin-dir/**"
+```
+
+This uses the same glob-based pattern matching as other artifact type overrides.
 
 ---
 

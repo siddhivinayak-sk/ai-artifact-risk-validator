@@ -33,7 +33,7 @@ def _make_report(
         artifact_path="test_artifact.md",
         artifact_type=ArtifactType.PROMPT,
         scan_timestamp=datetime(2025, 1, 1, 12, 0, 0),
-        scanner_version="0.9.0",
+        scanner_version="0.10.0",
         findings=_findings,
         summary=ScanSummary(
             total_findings=len(_findings),

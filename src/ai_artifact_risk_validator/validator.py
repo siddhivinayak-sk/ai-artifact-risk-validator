@@ -3,12 +3,18 @@
 Orchestrates the full scan pipeline:
     discovery → classification → scanning → aggregation → gate decision → reporting
 
+Implements a two-pass classification strategy:
+    Pass 1: classify and scan non-script files
+    Pass 2: classify script files using context from pass 1 (reference resolution,
+             MCP project detection, sibling classification)
+
 Implements graceful degradation by catching all exceptions and returning
 a ScanReport with error status rather than propagating exceptions to callers.
 """
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -19,10 +25,16 @@ from ai_artifact_risk_validator._internal.logging import (
     configure_logging,
     get_logger,
 )
-from ai_artifact_risk_validator.classifiers import ArtifactClassifier
+from ai_artifact_risk_validator.classifiers import ArtifactClassifier, ClassificationResult
+from ai_artifact_risk_validator.classifiers.mcp_detector import MCPProjectDetector
+from ai_artifact_risk_validator.classifiers.reference_resolver import ReferenceResolver
+from ai_artifact_risk_validator.classifiers.script_context import (
+    ScriptClassificationContext,
+)
 from ai_artifact_risk_validator.config.manager import ConfigManager
 from ai_artifact_risk_validator.models.config import ValidatorConfig
-from ai_artifact_risk_validator.models.enums import GateAction
+from ai_artifact_risk_validator.models.enums import ArtifactType, GateAction
+from ai_artifact_risk_validator.models.findings import ScanFinding
 from ai_artifact_risk_validator.models.report import ScanReport, ScanSummary
 from ai_artifact_risk_validator.pipeline.aggregator import Aggregator
 from ai_artifact_risk_validator.pipeline.discovery import FileDiscovery
@@ -134,6 +146,12 @@ class Validator:
     ) -> ScanReport:
         """Execute the scan pipeline after context is bound.
 
+        Implements two-pass orchestration:
+            Pass 1: classify and scan non-script files (existing behavior)
+            Pass 2: classify script files using context from pass 1
+                    (reference resolution, MCP project detection, sibling
+                    classification), then scan classified scripts
+
         Args:
             resolved_path: The resolved Path object.
             original_path: The original path argument passed to verify().
@@ -159,33 +177,46 @@ class Validator:
             scan_path=str(resolved_path),
         )
 
-        # Step 2 & 3: Execute pipeline (classify + scan in parallel)
-        raw_findings = self._pipeline_executor.execute(
-            files=files,
+        # Step 2: Partition files into script and non-script
+        script_files, non_script_files = self._partition_files(files)
+
+        # Step 3: Execute Pass 1 — classify and scan non-script files
+        pass1_findings = self._pipeline_executor.execute(
+            files=non_script_files,
             classifier=self._classifier,
             scanner_registry=self._scanner_registry,
         )
 
-        # Step 4: Aggregate and deduplicate
+        # Step 4: Execute Pass 2 — classify and scan script files (if enabled)
+        pass2_findings = self._execute_script_pass(
+            script_files=script_files,
+            all_files=files,
+            resolved_path=resolved_path,
+        )
+
+        # Step 5: Combine findings from both passes
+        raw_findings = pass1_findings + pass2_findings
+
+        # Step 6: Aggregate and deduplicate
         aggregated_findings = self._aggregator.aggregate(
             findings=raw_findings,
             suppression_rules=self._config.suppression_rules or None,
         )
 
-        # Step 5: Apply confidence-based suppression
+        # Step 7: Apply confidence-based suppression
         filtered_findings = [
             finding
             for finding in aggregated_findings
             if not should_suppress(finding, self._config.log_level)
         ]
 
-        # Step 6: Determine artifact_type for single-file scans
+        # Step 8: Determine artifact_type for single-file scans
         artifact_type = None
         if resolved_path.is_file() and filtered_findings:
             # Use the artifact type from the first finding if available
             artifact_type = filtered_findings[0].artifact_type
 
-        # Step 7: Generate report
+        # Step 9: Generate report
         report = self._report_generator.generate(
             findings=filtered_findings,
             artifact_path=str(original_path),
@@ -200,6 +231,334 @@ class Validator:
         )
 
         return report
+
+    def _partition_files(self, files: list[Path]) -> tuple[list[Path], list[Path]]:
+        """Partition discovered files into script and non-script files.
+
+        Uses the configured ``script_extensions`` list to determine which
+        files are script files. Only partitions when script scanning is
+        enabled; otherwise all files are treated as non-script.
+
+        Args:
+            files: All discovered files.
+
+        Returns:
+            Tuple of (script_files, non_script_files).
+        """
+        if not self._config.script_scanning_enabled:
+            return [], files
+
+        extensions = {ext.lower() for ext in self._config.script_extensions}
+        script_files: list[Path] = []
+        non_script_files: list[Path] = []
+
+        for f in files:
+            if f.suffix.lower() in extensions:
+                script_files.append(f)
+            else:
+                non_script_files.append(f)
+
+        return script_files, non_script_files
+
+    def _execute_script_pass(
+        self,
+        script_files: list[Path],
+        all_files: list[Path],
+        resolved_path: Path,
+    ) -> list[ScanFinding]:
+        """Execute pass 2: classify and scan script files.
+
+        When script scanning is disabled or no script files exist, returns
+        an empty list immediately. When script_extensions is empty, logs a
+        WARNING and skips script scanning.
+
+        Args:
+            script_files: Script files discovered during partitioning.
+            all_files: All discovered files (for reference resolution).
+            resolved_path: The root scan path.
+
+        Returns:
+            List of ScanFinding from scanning classified script files.
+        """
+        # Skip entirely when script scanning is disabled
+        if not self._config.script_scanning_enabled:
+            logger.debug("Script scanning disabled, skipping script pass")
+            return []
+
+        # Skip when no script extensions configured
+        if not self._config.script_extensions:
+            logger.warning("No script extensions configured, skipping script scanning")
+            return []
+
+        # Skip when no script files were found
+        if not script_files:
+            return []
+
+        # Req 9.6: Log candidate script count and extensions at DEBUG level
+        extensions_list = sorted(set(f.suffix.lower() for f in script_files if f.suffix))
+        logger.debug(
+            "Script scanning started",
+            candidate_script_count=len(script_files),
+            extensions=extensions_list,
+        )
+
+        # Build ScriptClassificationContext from pass 1 results
+        context = self._build_script_context(
+            script_files=script_files,
+            all_files=all_files,
+            resolved_path=resolved_path,
+        )
+
+        # Classify script files using multi-layered signals
+        classified_scripts: list[tuple[Path, ClassificationResult]] = []
+        for script_path in script_files:
+            content = self._read_file_content(script_path)
+            result = self._classifier.classify_script(script_path, context, content)
+            if result is not None:
+                classified_scripts.append((script_path, result))
+                # Req 9.2: Log classification at INFO level
+                reason = self._determine_classification_reason(script_path, context, result)
+                logger.info(
+                    "Script classified as AI-related",
+                    file_path=str(script_path.resolve()),
+                    artifact_type=result.artifact_type.value,
+                    reason=reason,
+                )
+            else:
+                # Req 9.1: Log skip at DEBUG level
+                logger.debug(
+                    "Script skipped, not AI-related",
+                    file_path=str(script_path.resolve()),
+                    reason="no AI reference found",
+                )
+
+        if not classified_scripts:
+            return []
+
+        # Scan classified scripts through the pipeline executor
+        # Create a temporary executor to scan only the classified scripts
+        # We use a custom process that respects pre-existing classifications
+        pass2_findings = self._scan_classified_scripts(classified_scripts)
+
+        return pass2_findings
+
+    @staticmethod
+    def _determine_classification_reason(
+        script_path: Path,
+        context: ScriptClassificationContext,
+        result: ClassificationResult,
+    ) -> str:
+        """Determine a human-readable classification reason for a script.
+
+        Maps classification signals and context back to a single-sentence
+        reason string as required by Req 9.2.
+
+        Args:
+            script_path: The script file that was classified.
+            context: The ScriptClassificationContext used for classification.
+            result: The ClassificationResult produced by classify_script.
+
+        Returns:
+            One of: "referenced by AI artifact", "located in Known_AI_Directory",
+            "MCP project detected", "sibling to AI artifact".
+        """
+        from ai_artifact_risk_validator.classifiers.script_patterns import (
+            KNOWN_AI_DIRECTORIES,
+            TYPE_INDICATING_DIRS,
+            TYPE_INDICATING_PATTERNS,
+        )
+
+        resolved_path = script_path.resolve()
+
+        # Check if referenced by AI artifact
+        if resolved_path in context.referenced_scripts:
+            return "referenced by AI artifact"
+
+        # Check if in a Known AI Directory
+        normalized = script_path.as_posix()
+        parts_lower = [p.lower() for p in Path(normalized).parts]
+        for dir_key in KNOWN_AI_DIRECTORIES:
+            dir_segments = dir_key.lower().split("/")
+            dir_len = len(dir_segments)
+            for i in range(len(parts_lower) - dir_len + 1):
+                if parts_lower[i : i + dir_len] == dir_segments:
+                    return "located in Known_AI_Directory"
+
+        # Check if in a Type-Indicating Directory (also path-based, reported
+        # as "located in Known_AI_Directory" since Req 9.2 defines only 4
+        # possible reason strings)
+        dir_parts = list(script_path.parts)[:-1]
+        for segment in dir_parts:
+            segment_lower = segment.lower()
+            if segment_lower in TYPE_INDICATING_DIRS:
+                return "located in Known_AI_Directory"
+            for pattern in TYPE_INDICATING_PATTERNS:
+                if re.search(pattern, segment_lower):
+                    return "located in Known_AI_Directory"
+
+        # Check if in MCP project directory
+        file_dir = resolved_path.parent
+        for mcp_dir in context.mcp_project_dirs:
+            try:
+                file_dir.relative_to(mcp_dir)
+                return "MCP project detected"
+            except ValueError:
+                continue
+
+        # Use the result signals to distinguish directory_context (sibling)
+        if "directory_context" in result.signals:
+            return "sibling to AI artifact"
+
+        # Default fallback
+        return "sibling to AI artifact"
+
+    def _build_script_context(
+        self,
+        script_files: list[Path],
+        all_files: list[Path],
+        resolved_path: Path,
+    ) -> ScriptClassificationContext:
+        """Build ScriptClassificationContext from pass 1 classification results.
+
+        Gathers directory_artifacts from the pipeline executor's tracked
+        classifications, runs MCPProjectDetector on all discovered files,
+        and runs ReferenceResolver on classified non-script artifacts.
+
+        Args:
+            script_files: Script files to be classified in pass 2.
+            all_files: All discovered files.
+            resolved_path: The root scan path.
+
+        Returns:
+            A populated ScriptClassificationContext.
+        """
+        # Build directory_artifacts from pass 1 classified files
+        directory_artifacts: dict[Path, list[tuple[ArtifactType, float]]] = {}
+        for file_path, classification in self._pipeline_executor._file_classifications.items():
+            file_dir = file_path.resolve().parent
+            if file_dir not in directory_artifacts:
+                directory_artifacts[file_dir] = []
+            directory_artifacts[file_dir].append(
+                (classification.artifact_type, classification.confidence)
+            )
+
+        # Detect MCP server project directories
+        mcp_detector = MCPProjectDetector()
+        mcp_project_dirs = mcp_detector.detect(all_files)
+
+        # Resolve script references from classified artifacts
+        reference_resolver = ReferenceResolver(
+            config=self._config,
+            scan_root=resolved_path,
+            discovered_files=all_files,
+        )
+        referenced_scripts = reference_resolver.resolve(
+            self._pipeline_executor._file_classifications
+        )
+
+        return ScriptClassificationContext(
+            directory_artifacts=directory_artifacts,
+            referenced_scripts=referenced_scripts,
+            mcp_project_dirs=mcp_project_dirs,
+        )
+
+    def _scan_classified_scripts(
+        self,
+        classified_scripts: list[tuple[Path, ClassificationResult]],
+    ) -> list[ScanFinding]:
+        """Scan pre-classified script files using the scanner registry.
+
+        For each classified script, reads content and runs applicable scanners.
+        This bypasses the normal classification step in the pipeline executor
+        since scripts have already been classified via classify_script().
+
+        Args:
+            classified_scripts: List of (path, classification) tuples.
+
+        Returns:
+            List of ScanFinding from all scanned script files.
+        """
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        all_findings: list[ScanFinding] = []
+
+        with ThreadPoolExecutor(max_workers=self._config.parallel_files) as executor:
+            future_to_script = {
+                executor.submit(self._scan_single_script, script_path, classification): script_path
+                for script_path, classification in classified_scripts
+            }
+
+            for future in as_completed(future_to_script):
+                script_path = future_to_script[future]
+                try:
+                    findings = future.result()
+                    all_findings.extend(findings)
+                except Exception as exc:
+                    logger.error(
+                        "Unexpected error scanning script file",
+                        artifact_path=str(script_path),
+                        error=str(exc),
+                    )
+
+        return all_findings
+
+    def _scan_single_script(
+        self,
+        script_path: Path,
+        classification: ClassificationResult,
+    ) -> list[ScanFinding]:
+        """Scan a single pre-classified script file.
+
+        Reads the file content and runs all applicable scanners for the
+        classified artifact type.
+
+        Args:
+            script_path: Path to the script file.
+            classification: The classification result from classify_script().
+
+        Returns:
+            List of ScanFinding from all applicable scanners.
+        """
+        content = self._read_file_content(script_path)
+        if content is None:
+            return []
+
+        artifact_type = classification.artifact_type
+        scanners = self._scanner_registry.get_scanners_for_artifact(artifact_type)
+        if not scanners:
+            return []
+
+        return self._pipeline_executor._run_scanners(scanners, content, artifact_type, script_path)
+
+    @staticmethod
+    def _read_file_content(file_path: Path) -> str | None:
+        """Read file content with UTF-8 fallback to latin-1.
+
+        Args:
+            file_path: Path to the file to read.
+
+        Returns:
+            File content as string, or None if reading fails.
+        """
+        try:
+            return file_path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            try:
+                return file_path.read_text(encoding="latin-1")
+            except (OSError, PermissionError) as exc:
+                logger.warning(
+                    "Failed to read file (latin-1 fallback)",
+                    artifact_path=str(file_path),
+                    error=str(exc),
+                )
+                return None
+        except (OSError, PermissionError) as exc:
+            logger.warning(
+                "Failed to read file",
+                artifact_path=str(file_path),
+                error=str(exc),
+            )
+            return None
 
     @property
     def version(self) -> str:

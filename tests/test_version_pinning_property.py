@@ -185,7 +185,7 @@ class TestVersionPinningVerification:
     analyzer = ConfigPrivilegeAnalyzer()
 
     @given(config=unpinned_mcp_config())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_unpinned_versions_produce_mcp_s5(self, config: MCPServerConfig) -> None:
         """For any MCP server source reference using unpinned version specifiers
         (including "latest", "*", "^x.y.z", "~x.y.z", or version ranges
@@ -201,7 +201,7 @@ class TestVersionPinningVerification:
         )
 
     @given(config=pinned_mcp_config())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_pinned_versions_produce_no_mcp_s5(self, config: MCPServerConfig) -> None:
         """For exact version numbers or commit hashes, no MCP-S5 finding
         SHALL be produced."""

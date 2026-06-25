@@ -943,8 +943,10 @@ class ComplianceAuditScanner(BaseScanner):
         """
         findings: list[ScanFinding] = []
 
-        # Skip if a regulatory framework is already referenced
+        # Skip if a regulatory framework or risk classification is already referenced
         if _REGULATORY_FRAMEWORK_PATTERN.search(content):
+            return findings
+        if _RISK_CLASSIFICATION_PATTERN.search(content):
             return findings
 
         try:

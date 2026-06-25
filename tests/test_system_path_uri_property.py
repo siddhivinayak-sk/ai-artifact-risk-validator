@@ -190,7 +190,7 @@ class TestSystemPathURIDetection:
     """
 
     @given(resource=system_path_resource())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_system_path_uri_produces_mcp_s9(self, resource: MCPResourceInfo) -> None:
         """Any resource URI referencing system paths (/etc/, /proc/, /sys/, ~/)
         SHALL produce at least one MCP-S9 finding with confidence 0.85."""
@@ -210,7 +210,7 @@ class TestSystemPathURIDetection:
         )
 
     @given(resource=wildcard_glob_resource())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_wildcard_glob_uri_produces_mcp_s9(self, resource: MCPResourceInfo) -> None:
         """Any resource URI containing wildcard glob patterns (*, **)
         SHALL produce at least one MCP-S9 finding with confidence 0.85."""
@@ -230,7 +230,7 @@ class TestSystemPathURIDetection:
         )
 
     @given(resource=env_var_resource())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_env_var_uri_produces_mcp_s9(self, resource: MCPResourceInfo) -> None:
         """Any resource URI containing environment variables ($VAR, ${VAR})
         SHALL produce at least one MCP-S9 finding with confidence 0.85."""

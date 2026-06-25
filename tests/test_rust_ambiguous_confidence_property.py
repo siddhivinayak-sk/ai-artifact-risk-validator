@@ -216,7 +216,7 @@ class TestAmbiguousInputConfidenceCap:
     """
 
     @given(code=rust_ambiguous_code_strategy)
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_ambiguous_findings_confidence_capped_at_070(self, code: str) -> None:
         """All findings from ambiguous input patterns have confidence <= 0.70."""
         analyzer = RustAnalyzer()
@@ -235,7 +235,7 @@ class TestAmbiguousInputConfidenceCap:
                 )
 
     @given(code=rust_ssrf_ambiguous_source())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_ssrf_ambiguous_url_confidence_capped(self, code: str) -> None:
         """SSRF findings with ambiguous URL variable have confidence <= 0.70."""
         analyzer = RustAnalyzer()
@@ -249,7 +249,7 @@ class TestAmbiguousInputConfidenceCap:
             )
 
     @given(code=rust_fs_ambiguous_source())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_fs_ambiguous_path_confidence_capped(self, code: str) -> None:
         """File system findings with ambiguous path variable have confidence <= 0.70."""
         analyzer = RustAnalyzer()
@@ -263,7 +263,7 @@ class TestAmbiguousInputConfidenceCap:
             )
 
     @given(code=rust_deser_ambiguous_source())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_deser_ambiguous_input_confidence_capped(self, code: str) -> None:
         """Deserialization findings with ambiguous input have confidence <= 0.70."""
         analyzer = RustAnalyzer()

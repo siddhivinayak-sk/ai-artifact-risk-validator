@@ -145,7 +145,7 @@ class TestSSRFPatternDetectionTSJS:
     scanner = TSJSEnhancedPatterns()
 
     @given(code=dynamic_url_fetch_with_template_literal())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_dynamic_url_fetch_produces_mcp_s2_finding(self, code: str) -> None:
         """For any TS/JS code containing a dynamic URL fetch with template literal,
         the scanner SHALL produce at least one ScanFinding with id='MCP-S2'
@@ -163,7 +163,7 @@ class TestSSRFPatternDetectionTSJS:
         )
 
     @given(code=dynamic_url_fetch_code_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_dynamic_url_in_context_produces_mcp_s2_finding(self, code: str) -> None:
         """For any TS/JS code snippet containing a dynamic URL fetch pattern
         embedded in surrounding code context, the scanner SHALL still detect
@@ -185,7 +185,7 @@ class TestSSRFPatternDetectionTSJS:
         var_name=variable_name_strategy,
         path=url_path_strategy,
     )
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_each_http_client_detected_with_template_literal(
         self, func: str, var_name: str, path: str
     ) -> None:

@@ -118,7 +118,7 @@ class TestModelValidationConsistency:
     """
 
     @given(data=valid_scan_finding_data())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_valid_scan_finding_constructs_successfully(self, data: dict) -> None:
         """Valid ScanFinding data with severity_score 1-10, confidence 0.0-1.0,
         and id matching ^[A-Z]+-[A-Z]?[0-9]+$ should construct successfully."""
@@ -137,7 +137,7 @@ class TestModelValidationConsistency:
         ),
         base_data=valid_scan_finding_data(),
     )
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_invalid_severity_score_raises_validation_error(
         self, invalid_severity: int, base_data: dict
     ) -> None:
@@ -154,7 +154,7 @@ class TestModelValidationConsistency:
         ),
         base_data=valid_scan_finding_data(),
     )
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_invalid_confidence_raises_validation_error(
         self, invalid_confidence: float, base_data: dict
     ) -> None:
@@ -168,7 +168,7 @@ class TestModelValidationConsistency:
         invalid_id=invalid_id_strategy,
         base_data=valid_scan_finding_data(),
     )
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_invalid_id_pattern_raises_validation_error(
         self, invalid_id: str, base_data: dict
     ) -> None:

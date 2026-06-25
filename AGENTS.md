@@ -29,7 +29,13 @@ ai-artifact-validator verify <path> [options]
 
 ```
 validator.py              # Orchestration: discovery → classify → scan → aggregate → gate → report
+                          # Two-pass strategy: pass 1 (non-scripts) → pass 2 (scripts with context)
 classifiers/              # Artifact type detection (PROMPT, SKILL, AGENT, MCP, HOOK, etc.)
+  classifier.py           # ArtifactClassifier with classify() and classify_script() methods
+  script_patterns.py      # Known AI Directory & Type-Indicating Directory pattern definitions
+  script_context.py       # ScriptClassificationContext dataclass for pass-2 signals
+  reference_resolver.py   # Extracts script references from classified AI artifacts
+  mcp_detector.py         # Detects MCP server projects via build marker analysis
 pipeline/
   executor.py             # Parallel scanner execution (30s timeout per scanner)
   gate.py                 # BLOCK/WARN/INFO gate decisions + suppression
@@ -132,11 +138,17 @@ Comment on line N suppresses findings on line N+1.
 
 | File | Role |
 |------|------|
-| [src/ai_artifact_risk_validator/validator.py](src/ai_artifact_risk_validator/validator.py) | Main orchestration entry point |
+| [src/ai_artifact_risk_validator/validator.py](src/ai_artifact_risk_validator/validator.py) | Main orchestration entry point (two-pass script pipeline) |
 | [src/ai_artifact_risk_validator/scanners/base.py](src/ai_artifact_risk_validator/scanners/base.py) | BaseScanner interface |
 | [src/ai_artifact_risk_validator/scanners/registry.py](src/ai_artifact_risk_validator/scanners/registry.py) | Scanner discovery & registration |
 | [src/ai_artifact_risk_validator/models/enums.py](src/ai_artifact_risk_validator/models/enums.py) | ArtifactType, RiskCategory, SeverityLabel, GateAction, ScannerModule |
 | [src/ai_artifact_risk_validator/models/findings.py](src/ai_artifact_risk_validator/models/findings.py) | ScanFinding data model |
+| [src/ai_artifact_risk_validator/models/config.py](src/ai_artifact_risk_validator/models/config.py) | ValidatorConfig (includes script_scanning_enabled, script_extensions) |
+| [src/ai_artifact_risk_validator/classifiers/classifier.py](src/ai_artifact_risk_validator/classifiers/classifier.py) | ArtifactClassifier with classify_script() for multi-layered script classification |
+| [src/ai_artifact_risk_validator/classifiers/reference_resolver.py](src/ai_artifact_risk_validator/classifiers/reference_resolver.py) | ReferenceResolver — extracts script refs from classified artifacts |
+| [src/ai_artifact_risk_validator/classifiers/mcp_detector.py](src/ai_artifact_risk_validator/classifiers/mcp_detector.py) | MCPProjectDetector — identifies MCP server projects via build markers |
+| [src/ai_artifact_risk_validator/classifiers/script_patterns.py](src/ai_artifact_risk_validator/classifiers/script_patterns.py) | KNOWN_AI_DIRECTORIES, TYPE_INDICATING_DIRS, DEFAULT_SCRIPT_EXTENSIONS |
+| [src/ai_artifact_risk_validator/classifiers/script_context.py](src/ai_artifact_risk_validator/classifiers/script_context.py) | ScriptClassificationContext dataclass |
 | [src/ai_artifact_risk_validator/pipeline/gate.py](src/ai_artifact_risk_validator/pipeline/gate.py) | Gate decision + suppression logic |
 | [src/ai_artifact_risk_validator/risks/definitions/](src/ai_artifact_risk_validator/risks/definitions) | 190+ risk definitions by artifact type |
 | [src/ai_artifact_risk_validator/config/manager.py](src/ai_artifact_risk_validator/config/manager.py) | Config loading (3-tier precedence) |

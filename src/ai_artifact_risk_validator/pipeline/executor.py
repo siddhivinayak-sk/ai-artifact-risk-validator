@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from ai_artifact_risk_validator._internal.logging import get_logger
-from ai_artifact_risk_validator.classifiers import ArtifactClassifier
+from ai_artifact_risk_validator.classifiers import ArtifactClassifier, ClassificationResult
 from ai_artifact_risk_validator.models import ScanFinding, ValidatorConfig
 from ai_artifact_risk_validator.models.enums import ArtifactType
 from ai_artifact_risk_validator.pipeline.cross_file_analyzer import CrossFileAnalyzer
@@ -48,6 +48,8 @@ class PipelineExecutor:
         # Populated during execute() for cross-file analysis.
         self._file_contents: dict[Path, str] = {}
         self._file_types: dict[Path, ArtifactType] = {}
+        # Populated during execute() for two-pass context building.
+        self._file_classifications: dict[Path, ClassificationResult] = {}
 
     def execute(
         self,
@@ -77,6 +79,7 @@ class PipelineExecutor:
         all_findings: list[ScanFinding] = []
         self._file_contents = {}
         self._file_types = {}
+        self._file_classifications = {}
 
         with ThreadPoolExecutor(max_workers=self._parallel_files) as file_executor:
             future_to_file = {
@@ -143,9 +146,10 @@ class PipelineExecutor:
 
         artifact_type = classification.artifact_type
 
-        # Store for cross-file analysis
+        # Store for cross-file analysis and two-pass context building
         self._file_contents[file_path] = content
         self._file_types[file_path] = artifact_type
+        self._file_classifications[file_path] = classification
 
         # Step 3: Get applicable scanners
         scanners = scanner_registry.get_scanners_for_artifact(artifact_type)

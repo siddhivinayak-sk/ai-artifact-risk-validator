@@ -130,6 +130,57 @@ class TestFileDiscoveryDirectory:
         assert len(result) == 1
 
 
+class TestFileDiscoveryKiroDirectory:
+    """Tests for .kiro directory inclusion based on script_scanning_enabled."""
+
+    def test_kiro_included_when_script_scanning_enabled(self, tmp_path: Path):
+        """When script_scanning_enabled=True, .kiro is NOT in skip dirs."""
+        config = ValidatorConfig(script_scanning_enabled=True)
+        discovery = FileDiscovery(config)
+        assert ".kiro" not in discovery._skip_dirs
+
+    def test_kiro_skipped_when_script_scanning_disabled(self, tmp_path: Path):
+        """When script_scanning_enabled=False, .kiro IS in skip dirs."""
+        config = ValidatorConfig(script_scanning_enabled=False)
+        discovery = FileDiscovery(config)
+        assert ".kiro" in discovery._skip_dirs
+
+    def test_discovers_files_in_kiro_when_enabled(self, tmp_path: Path):
+        """Files in .kiro/ are discovered when script scanning is enabled."""
+        kiro_dir = tmp_path / ".kiro" / "hooks"
+        kiro_dir.mkdir(parents=True)
+        script = kiro_dir / "pre-commit.sh"
+        script.write_text("#!/bin/bash\necho hello")
+
+        config = ValidatorConfig(script_scanning_enabled=True)
+        discovery = FileDiscovery(config)
+        result = discovery.discover(tmp_path)
+        assert script in result
+
+    def test_skips_kiro_when_disabled(self, tmp_path: Path):
+        """Files in .kiro/ are NOT discovered when script scanning is disabled."""
+        kiro_dir = tmp_path / ".kiro" / "hooks"
+        kiro_dir.mkdir(parents=True)
+        script = kiro_dir / "pre-commit.sh"
+        script.write_text("#!/bin/bash\necho hello")
+
+        config = ValidatorConfig(script_scanning_enabled=False)
+        discovery = FileDiscovery(config)
+        result = discovery.discover(tmp_path)
+        assert script not in result
+
+    def test_default_config_includes_kiro(self, tmp_path: Path):
+        """Default config (script_scanning_enabled=True) includes .kiro."""
+        kiro_dir = tmp_path / ".kiro"
+        kiro_dir.mkdir()
+        script = kiro_dir / "run.py"
+        script.write_text("print('hello')")
+
+        discovery = FileDiscovery()
+        result = discovery.discover(tmp_path)
+        assert script in result
+
+
 class TestFileDiscoveryEdgeCases:
     """Tests for edge cases and error handling."""
 

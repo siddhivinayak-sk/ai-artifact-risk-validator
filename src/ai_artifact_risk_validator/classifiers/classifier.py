@@ -18,7 +18,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +32,9 @@ from .patterns import (
     PATH_PATTERNS,
     SIGNAL_WEIGHTS,
 )
+
+if TYPE_CHECKING:
+    from .script_context import ScriptClassificationContext
 
 logger = get_logger(__name__)
 
@@ -375,6 +378,256 @@ class ArtifactClassifier:
         except Exception:
             logger.debug("Semantic classification failed", artifact_type=artifact_type.value)
             return 0.0
+
+    def classify_script(
+        self,
+        file_path: Path,
+        context: ScriptClassificationContext,
+        content: str | None = None,
+    ) -> ClassificationResult | None:
+        """Classify a script file using multi-layered signals.
+
+        Classification precedence (highest to lowest):
+        1. Known AI Directory detection (path signal, weight 0.35)
+        2. Type-Indicating Directory (path signal, weight 0.35)
+        3. Reference resolution (referenced_scripts context)
+        4. MCP Server Project detection (path signal, weight 0.35)
+        5. Sibling artifact classification (directory_context signal, weight 0.30)
+
+        Returns a ClassificationResult if at least one signal produces a score
+        exceeding the classification threshold (0.30), or None otherwise.
+
+        Args:
+            file_path: Path to the script file being classified.
+            context: ScriptClassificationContext with pass-1 classification data.
+            content: Optional file content (unused for signal injection but
+                preserved for forward compatibility).
+
+        Returns:
+            ClassificationResult with artifact_type and confidence, or None
+            if no signal produces a score above the classification threshold.
+        """
+        from .script_patterns import (
+            KNOWN_AI_DIRECTORIES,
+            TYPE_INDICATING_DIRS,
+            TYPE_INDICATING_PATTERNS,
+        )
+
+        # 1. Known AI Directory detection (weight 0.35)
+        known_result = self._check_known_ai_directory(file_path, KNOWN_AI_DIRECTORIES)
+        if known_result is not None:
+            return known_result
+
+        # 2. Type-Indicating Directory (weight 0.35)
+        type_dir_result = self._check_type_indicating_directory(
+            file_path, TYPE_INDICATING_DIRS, TYPE_INDICATING_PATTERNS
+        )
+        if type_dir_result is not None:
+            return type_dir_result
+
+        # 3. Reference Resolution
+        resolved_path = file_path.resolve()
+        if resolved_path in context.referenced_scripts:
+            ref_type = context.referenced_scripts[resolved_path]
+            return ClassificationResult(
+                artifact_type=ref_type,
+                confidence=0.35,
+                signals=["path"],
+            )
+
+        # 4. MCP Server Project detection (weight 0.35)
+        file_dir = file_path.resolve().parent
+        for mcp_dir in context.mcp_project_dirs:
+            try:
+                file_dir.relative_to(mcp_dir)
+                return ClassificationResult(
+                    artifact_type=ArtifactType.MCP,
+                    confidence=0.35,
+                    signals=["path"],
+                )
+            except ValueError:
+                continue
+
+        # 5. Sibling Artifact Classification (weight 0.30)
+        sibling_result = self._check_sibling_classification(file_path, context)
+        if sibling_result is not None:
+            return sibling_result
+
+        return None
+
+    def _check_known_ai_directory(
+        self,
+        file_path: Path,
+        known_dirs: dict[str, ArtifactType | dict[str, ArtifactType]],
+    ) -> ClassificationResult | None:
+        """Check if a file resides in a Known AI Directory.
+
+        For directories with subdirectory-specific mappings (like .kiro),
+        checks path segments after the known dir prefix for a subdirectory match.
+
+        Args:
+            file_path: Path to the script file.
+            known_dirs: Mapping from KNOWN_AI_DIRECTORIES.
+
+        Returns:
+            ClassificationResult with confidence 0.35 if matched, else None.
+        """
+        normalized = file_path.as_posix()
+        parts_lower = [p.lower() for p in Path(normalized).parts]
+
+        for dir_key, type_or_map in known_dirs.items():
+            # The dir_key can contain slashes (e.g., ".github/copilot")
+            dir_segments = dir_key.lower().split("/")
+            dir_len = len(dir_segments)
+
+            # Search for the dir_key segments in the path
+            for i in range(len(parts_lower) - dir_len + 1):
+                if parts_lower[i : i + dir_len] == dir_segments:
+                    # Matched the known directory prefix
+                    if isinstance(type_or_map, dict):
+                        # Check subdirectory segments after the known dir
+                        remaining = parts_lower[i + dir_len :]
+                        artifact_type: ArtifactType | None = None
+                        for seg in remaining:
+                            if seg in type_or_map:
+                                artifact_type = type_or_map[seg]
+                                break
+                        if artifact_type is None:
+                            artifact_type = type_or_map.get("_default", ArtifactType.INSTRUCTION)
+                        return ClassificationResult(
+                            artifact_type=artifact_type,
+                            confidence=0.35,
+                            signals=["path"],
+                        )
+                    else:
+                        return ClassificationResult(
+                            artifact_type=type_or_map,
+                            confidence=0.35,
+                            signals=["path"],
+                        )
+
+        return None
+
+    def _check_type_indicating_directory(
+        self,
+        file_path: Path,
+        type_dirs: dict[str, ArtifactType],
+        type_patterns: dict[str, ArtifactType],
+    ) -> ClassificationResult | None:
+        """Check if any parent directory segment matches Type-Indicating patterns.
+
+        Uses case-insensitive exact match against TYPE_INDICATING_DIRS and
+        case-insensitive substring/regex match against TYPE_INDICATING_PATTERNS.
+        Applies nearest-ancestor logic: the matching segment closest to the file
+        wins. For ties at the same depth, uses alphabetical ordering of the
+        directory name as a deterministic fallback.
+
+        Args:
+            file_path: Path to the script file.
+            type_dirs: Mapping from TYPE_INDICATING_DIRS.
+            type_patterns: Mapping from TYPE_INDICATING_PATTERNS.
+
+        Returns:
+            ClassificationResult with confidence 0.35 if matched, else None.
+        """
+        parts = list(file_path.parts)
+        # Exclude the filename itself — only check directory segments
+        dir_parts = parts[:-1] if parts else []
+
+        # Search from nearest ancestor to farthest (reverse order)
+        # Track the best match: closest to file wins
+        best_type: ArtifactType | None = None
+        best_depth: int = -1  # Higher index = closer to file
+        best_dir_name: str = ""
+
+        for idx, segment in enumerate(dir_parts):
+            segment_lower = segment.lower()
+
+            # Check exact match against TYPE_INDICATING_DIRS (case-insensitive)
+            if segment_lower in type_dirs:
+                if idx > best_depth or (idx == best_depth and segment_lower < best_dir_name):
+                    best_type = type_dirs[segment_lower]
+                    best_depth = idx
+                    best_dir_name = segment_lower
+
+            # Check regex/substring match against TYPE_INDICATING_PATTERNS
+            for pattern, artifact_type in type_patterns.items():
+                if re.search(pattern, segment_lower, re.IGNORECASE):
+                    if idx > best_depth or (idx == best_depth and segment_lower < best_dir_name):
+                        best_type = artifact_type
+                        best_depth = idx
+                        best_dir_name = segment_lower
+
+        if best_type is not None:
+            return ClassificationResult(
+                artifact_type=best_type,
+                confidence=0.35,
+                signals=["path"],
+            )
+
+        return None
+
+    def _check_sibling_classification(
+        self,
+        file_path: Path,
+        context: ScriptClassificationContext,
+    ) -> ClassificationResult | None:
+        """Check sibling artifact classification for the file's directory.
+
+        Only uses siblings from directory_artifacts (non-script files classified
+        through non-sibling signals) to prevent transitivity.
+
+        If mcp.json is present in the directory, always returns MCP regardless
+        of other siblings.
+
+        Args:
+            file_path: Path to the script file.
+            context: ScriptClassificationContext with directory_artifacts data.
+
+        Returns:
+            ClassificationResult with confidence 0.30 if matched, else None.
+        """
+        file_dir = file_path.resolve().parent
+
+        # Check for mcp.json sibling override
+        mcp_json_path = file_dir / "mcp.json"
+        if mcp_json_path.exists():
+            return ClassificationResult(
+                artifact_type=ArtifactType.MCP,
+                confidence=0.30,
+                signals=["directory_context"],
+            )
+
+        # Look up directory_artifacts for this directory
+        siblings = context.directory_artifacts.get(file_dir, [])
+        if not siblings:
+            return None
+
+        # Find the sibling with the highest confidence score
+        # For ties, use ArtifactType enum ordering (first in enum wins)
+        best_type: ArtifactType | None = None
+        best_confidence: float = -1.0
+
+        # Build enum order mapping for tie-breaking
+        enum_order = {t: i for i, t in enumerate(ArtifactType)}
+
+        for artifact_type, confidence in siblings:
+            if confidence > best_confidence or (
+                confidence == best_confidence
+                and best_type is not None
+                and enum_order.get(artifact_type, 999) < enum_order.get(best_type, 999)
+            ):
+                best_type = artifact_type
+                best_confidence = confidence
+
+        if best_type is not None and best_confidence >= _CLASSIFICATION_THRESHOLD:
+            return ClassificationResult(
+                artifact_type=best_type,
+                confidence=0.30,
+                signals=["directory_context"],
+            )
+
+        return None
 
     @staticmethod
     def _read_file_content(file_path: Path) -> str | None:

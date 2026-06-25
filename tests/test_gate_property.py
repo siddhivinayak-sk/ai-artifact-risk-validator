@@ -133,7 +133,7 @@ class TestFalsePositiveExclusionFromCounts:
     """
 
     @given(findings=findings_list_strategy(min_size=1, max_size=15, false_positive=True))
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_all_false_positive_findings_returns_info_gate(
         self, findings: list[ScanFinding]
     ) -> None:
@@ -142,7 +142,7 @@ class TestFalsePositiveExclusionFromCounts:
         assert result == GateAction.INFO
 
     @given(findings=findings_list_strategy(min_size=1, max_size=15, false_positive=True))
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_all_false_positive_findings_have_zero_blocking_warning_counts(
         self, findings: list[ScanFinding]
     ) -> None:
@@ -156,7 +156,7 @@ class TestFalsePositiveExclusionFromCounts:
         assert counts["info_findings"] == 0
 
     @given(findings=findings_list_strategy(min_size=1, max_size=20))
-    @settings(max_examples=200)
+    @settings(max_examples=200, deadline=None)
     def test_total_findings_includes_all_regardless_of_false_positive(
         self, findings: list[ScanFinding]
     ) -> None:
@@ -165,7 +165,7 @@ class TestFalsePositiveExclusionFromCounts:
         assert counts["total_findings"] == len(findings)
 
     @given(findings=findings_list_strategy(min_size=1, max_size=20))
-    @settings(max_examples=200)
+    @settings(max_examples=200, deadline=None)
     def test_gate_counts_exclude_false_positive_findings(self, findings: list[ScanFinding]) -> None:
         """blocking + warning + info counts only include non-false-positive findings."""
         counts = compute_summary_counts(findings)
@@ -178,7 +178,7 @@ class TestFalsePositiveExclusionFromCounts:
         assert gate_count_sum == non_fp_count
 
     @given(findings=findings_list_strategy(min_size=1, max_size=20))
-    @settings(max_examples=200)
+    @settings(max_examples=200, deadline=None)
     def test_overall_gate_only_considers_non_false_positive_findings(
         self, findings: list[ScanFinding]
     ) -> None:

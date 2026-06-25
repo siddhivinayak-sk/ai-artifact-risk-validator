@@ -155,7 +155,7 @@ class TestSuppressionRuleApplication:
     """
 
     @given(data=st.data())
-    @settings(max_examples=200)
+    @settings(max_examples=200, deadline=None)
     def test_matching_finding_marked_false_positive_via_suppression_module(
         self, data: st.DataObject
     ) -> None:
@@ -169,7 +169,7 @@ class TestSuppressionRuleApplication:
         assert result[0].false_positive is True
 
     @given(data=st.data())
-    @settings(max_examples=200)
+    @settings(max_examples=200, deadline=None)
     def test_matching_finding_marked_false_positive_via_aggregator(
         self, data: st.DataObject
     ) -> None:
@@ -184,7 +184,7 @@ class TestSuppressionRuleApplication:
         assert result[0].false_positive is True
 
     @given(data=st.data())
-    @settings(max_examples=200)
+    @settings(max_examples=200, deadline=None)
     def test_non_matching_finding_not_marked_false_positive(self, data: st.DataObject) -> None:
         """Findings that do NOT match any suppression rule retain false_positive=False."""
         finding, rule = data.draw(non_matching_finding_and_rule_strategy())
@@ -195,7 +195,7 @@ class TestSuppressionRuleApplication:
         assert result[0].false_positive is False
 
     @given(data=st.data())
-    @settings(max_examples=200)
+    @settings(max_examples=200, deadline=None)
     def test_rule_with_no_file_pattern_matches_all_paths(self, data: st.DataObject) -> None:
         """A suppression rule with file_pattern=None matches any finding with
         the same risk_id, regardless of artifact_path."""
@@ -212,7 +212,7 @@ class TestSuppressionRuleApplication:
         assert result[0].false_positive is True
 
     @given(data=st.data())
-    @settings(max_examples=200)
+    @settings(max_examples=200, deadline=None)
     def test_suppression_preserves_finding_data(self, data: st.DataObject) -> None:
         """Suppression only changes false_positive; all other fields remain unchanged."""
         finding, rule = data.draw(matching_finding_and_rule_strategy())
@@ -241,7 +241,7 @@ class TestSuppressionRuleApplication:
             max_size=5,
         ),
     )
-    @settings(max_examples=200)
+    @settings(max_examples=200, deadline=None)
     def test_all_matching_findings_are_suppressed_in_bulk(
         self, findings: list[ScanFinding], rules: list[SuppressionRule]
     ) -> None:

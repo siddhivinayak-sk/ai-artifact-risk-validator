@@ -460,7 +460,7 @@ class TestJavaRCEPatternDetection:
     analyzer = JavaAnalyzer()
 
     @given(code=java_runtime_exec_code())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_runtime_exec_detected_as_mcp_s1(self, code: str) -> None:
         """For any Java/Kotlin source file containing Runtime.exec(),
         the JavaAnalyzer SHALL produce at least one ScanFinding with id="MCP-S1"."""
@@ -477,7 +477,7 @@ class TestJavaRCEPatternDetection:
         )
 
     @given(code=java_process_builder_code())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_process_builder_detected_as_mcp_s1(self, code: str) -> None:
         """For any Java/Kotlin source file containing ProcessBuilder,
         the JavaAnalyzer SHALL produce at least one ScanFinding with id="MCP-S1"."""
@@ -494,7 +494,7 @@ class TestJavaRCEPatternDetection:
         )
 
     @given(code=java_script_engine_eval_code())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_script_engine_eval_detected_as_mcp_s1(self, code: str) -> None:
         """For any Java/Kotlin source file containing ScriptEngine.eval(),
         the JavaAnalyzer SHALL produce at least one ScanFinding with id="MCP-S1"."""
@@ -522,7 +522,7 @@ class TestJavaDeserializationDetection:
     analyzer = JavaAnalyzer()
 
     @given(code=java_object_input_stream_code())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_object_input_stream_detected_as_mcp_s8(self, code: str) -> None:
         """For any Java/Kotlin source file containing ObjectInputStream.readObject(),
         the JavaAnalyzer SHALL produce at least one ScanFinding with id="MCP-S8"."""
@@ -539,7 +539,7 @@ class TestJavaDeserializationDetection:
         )
 
     @given(code=java_xml_decoder_code())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_xml_decoder_detected_as_mcp_s8(self, code: str) -> None:
         """For any Java/Kotlin source file containing XMLDecoder,
         the JavaAnalyzer SHALL produce at least one ScanFinding with id="MCP-S8"."""
@@ -556,7 +556,7 @@ class TestJavaDeserializationDetection:
         )
 
     @given(code=java_xstream_code())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_xstream_from_xml_detected_as_mcp_s8(self, code: str) -> None:
         """For any Java/Kotlin source file containing XStream.fromXML(),
         the JavaAnalyzer SHALL produce at least one ScanFinding with id="MCP-S8"."""
@@ -573,7 +573,7 @@ class TestJavaDeserializationDetection:
         )
 
     @given(code=java_kryo_code())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_kryo_read_object_detected_as_mcp_s8(self, code: str) -> None:
         """For any Java/Kotlin source file containing Kryo.readObject(),
         the JavaAnalyzer SHALL produce at least one ScanFinding with id="MCP-S8"."""

@@ -66,6 +66,21 @@ class FileDiscovery:
         self._include_patterns: list[str] = self._config.file_include_patterns
         self._exclude_patterns: list[str] = self._config.file_exclude_patterns
         self._max_file_size_bytes: int = self._config.max_file_size_bytes
+        # Build the effective skip dirs set, conditionally including .kiro
+        self._skip_dirs: frozenset[str] = self._build_skip_dirs()
+
+    def _build_skip_dirs(self) -> frozenset[str]:
+        """Build the effective set of directories to skip during traversal.
+
+        When script_scanning_enabled is True, `.kiro` is removed from the
+        skip set so that script files within `.kiro/` are discovered.
+
+        Returns:
+            Frozenset of directory names to skip.
+        """
+        if self._config.script_scanning_enabled:
+            return _ALWAYS_SKIP_DIRS - {".kiro"}
+        return _ALWAYS_SKIP_DIRS
 
     def discover(self, path: Path) -> list[Path]:
         """Discover files at the given path, applying filters.
@@ -114,7 +129,7 @@ class FileDiscovery:
         try:
             for dirpath, dirnames, filenames in os.walk(directory, topdown=True):
                 # Prune directories in-place so os.walk skips them
-                dirnames[:] = [d for d in dirnames if not self._should_skip_dir(d)]
+                dirnames[:] = [d for d in dirnames if not self._should_skip_dir_instance(d)]
 
                 for fname in filenames:
                     file_path = Path(dirpath) / fname
@@ -164,6 +179,25 @@ class FileDiscovery:
         # Support glob patterns like *.egg-info
         return any(
             fnmatch.fnmatch(dirname, pat) for pat in _ALWAYS_SKIP_DIRS if "*" in pat or "?" in pat
+        )
+
+    def _should_skip_dir_instance(self, dirname: str) -> bool:
+        """Check whether a directory name should be pruned from traversal.
+
+        Uses the instance's effective skip dirs set (which may exclude
+        `.kiro` when script scanning is enabled).
+
+        Args:
+            dirname: The directory's base name.
+
+        Returns:
+            True if the directory should be skipped.
+        """
+        if dirname in self._skip_dirs:
+            return True
+        # Support glob patterns like *.egg-info
+        return any(
+            fnmatch.fnmatch(dirname, pat) for pat in self._skip_dirs if "*" in pat or "?" in pat
         )
 
     def _passes_filters(self, file_path: Path) -> bool:
