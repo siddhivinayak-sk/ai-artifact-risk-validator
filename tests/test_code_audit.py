@@ -49,6 +49,7 @@ class TestScannerMetadata:
             "PL-S5",
             "PL-S9",
             "A-S3",
+            "A-S6",
             "A-S7",
             "RA-S1",
             "RA-S2",

@@ -961,6 +961,99 @@ class InjectionDetScanner(BaseScanner):
             references=["LLM01:2025 Prompt Injection"],
         )
 
+    def _is_documentation_context(
+        self,
+        content: str,
+        artifact_path: str,
+        line_number: int,
+    ) -> bool:
+        """Determine if a match is in documentation context.
+
+        Returns True when:
+        - The file path contains "security" or "test-plan" (case-insensitive).
+        - The match line is inside a Markdown bullet point (``- ``, ``* ``, ``+ `` prefix).
+        - The match is under a Markdown header containing security/threat/attack/
+          consideration/test keywords.
+
+        Args:
+            content: Full artifact text.
+            artifact_path: File path of the artifact.
+            line_number: 1-based line number of the match.
+
+        Returns:
+            True if documentation context is detected, False otherwise.
+        """
+        # Check file path for documentation naming conventions
+        path_lower = artifact_path.lower()
+        if "security" in path_lower or "test-plan" in path_lower:
+            return True
+
+        lines = content.splitlines()
+        if line_number < 1 or line_number > len(lines):
+            return False
+
+        # Check if match line is a Markdown bullet point
+        match_line = lines[line_number - 1]
+        stripped = match_line.lstrip()
+        if stripped.startswith("- ") or stripped.startswith("* ") or stripped.startswith("+ "):
+            return True
+
+        # Check if match is under a header with security-related keywords
+        header_keywords = re.compile(
+            r"\b(security|threat|attack|consideration|test)\b", re.IGNORECASE
+        )
+        # Walk backwards from the match line to find the nearest header
+        for i in range(line_number - 2, -1, -1):
+            line = lines[i].strip()
+            if line.startswith("#"):
+                if header_keywords.search(line):
+                    return True
+                # Found a header without the keywords — stop searching
+                break
+
+        return False
+
+    def _reduce_confidence_for_docs(
+        self,
+        finding: ScanFinding,
+        content: str,
+        artifact_path: str,
+    ) -> ScanFinding:
+        """Reduce confidence for findings in documentation context.
+
+        When documentation context is detected, sets confidence to 0.35
+        (below the 0.40 gate threshold). When context cannot be determined
+        (ambiguous), retains original confidence unchanged.
+
+        Args:
+            finding: The ScanFinding to potentially adjust.
+            content: Full artifact text.
+            artifact_path: File path of the artifact.
+
+        Returns:
+            The same finding (mutated in-place) with adjusted confidence if applicable.
+        """
+        line_number = (
+            finding.location.line
+            if finding.location and finding.location.line is not None
+            else None
+        )
+        if line_number is None:
+            # Cannot determine context — retain original confidence
+            return finding
+
+        if self._is_documentation_context(content, artifact_path, line_number):
+            logger.debug(
+                "documentation_confidence_reduction",
+                artifact_path=artifact_path,
+                line=line_number,
+                original_confidence=finding.confidence,
+                reduced_confidence=0.35,
+            )
+            finding.confidence = 0.35
+
+        return finding
+
     def _detect_direct_injection(
         self,
         content: str,
@@ -983,16 +1076,16 @@ class InjectionDetScanner(BaseScanner):
         for pattern in _DIRECT_INJECTION_PATTERNS:
             for match in pattern.finditer(content):
                 line = self._find_line_number(content, match.start())
-                findings.append(
-                    self._create_finding(
-                        risk_id=risk_id,
-                        artifact_type=artifact_type,
-                        artifact_path=artifact_path,
-                        evidence=match.group(0),
-                        confidence=0.95,
-                        line=line,
-                    )
+                finding = self._create_finding(
+                    risk_id=risk_id,
+                    artifact_type=artifact_type,
+                    artifact_path=artifact_path,
+                    evidence=match.group(0),
+                    confidence=0.95,
+                    line=line,
                 )
+                self._reduce_confidence_for_docs(finding, content, artifact_path)
+                findings.append(finding)
                 # Report only first match per pattern to avoid noise
                 break
 
@@ -1094,16 +1187,16 @@ class InjectionDetScanner(BaseScanner):
                     confidence = 0.95
                 else:
                     confidence = 0.75
-                findings.append(
-                    self._create_finding(
-                        risk_id=risk_id,
-                        artifact_type=artifact_type,
-                        artifact_path=artifact_path,
-                        evidence=match.group(0),
-                        confidence=confidence,
-                        line=line,
-                    )
+                finding = self._create_finding(
+                    risk_id=risk_id,
+                    artifact_type=artifact_type,
+                    artifact_path=artifact_path,
+                    evidence=match.group(0),
+                    confidence=confidence,
+                    line=line,
                 )
+                self._reduce_confidence_for_docs(finding, content, artifact_path)
+                findings.append(finding)
                 break
 
         return findings

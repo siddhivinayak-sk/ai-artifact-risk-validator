@@ -10,6 +10,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+import structlog
+
 from ai_artifact_risk_validator.models import (
     ArtifactType,
     FindingLocation,
@@ -21,6 +23,8 @@ from ai_artifact_risk_validator.models import (
     SeverityLabel,
 )
 from ai_artifact_risk_validator.scanners.base import BaseScanner
+
+logger = structlog.get_logger(__name__)
 
 # --- Risk metadata lookup ---
 _RISK_METADATA: dict[str, dict[str, Any]] = {
@@ -661,6 +665,56 @@ class PermAuditScanner(BaseScanner):
             references=[],
         )
 
+    @staticmethod
+    def _is_markdown_formatting(line: str, match_start: int) -> bool:
+        """Determine if an asterisk at match_start is Markdown formatting, not a glob.
+
+        Returns True when `*` or `**` immediately follows a word character
+        without a preceding path separator (`/` or `\\`) between the word and
+        the asterisk — indicating Markdown bold/italic rather than a glob
+        pattern.
+
+        Preserves detection when:
+        - `*` appears after a path separator (e.g., `/etc/*`, `/tmp/**`)
+        - `*` appears in a permission context (e.g., `access: ["*"]`)
+
+        Args:
+            line: The full text line containing the match.
+            match_start: The index within *line* where the asterisk starts.
+
+        Returns:
+            True if the asterisk is Markdown formatting and should be excluded.
+        """
+        if match_start <= 0:
+            return False
+
+        # Find the character immediately preceding the asterisk sequence
+        preceding_char = line[match_start - 1]
+
+        # If the preceding character is not a word character, it's not markdown
+        # formatting (could be a path separator, bracket, quote, etc.)
+        if not re.match(r"\w", preceding_char):
+            return False
+
+        # Walk backward from the asterisk to see if there's a path separator
+        # between the preceding word characters and the asterisk
+        i = match_start - 1
+        while i >= 0 and re.match(r"\w", line[i]):
+            i -= 1
+
+        # If we hit the beginning of the line or a non-path-separator character,
+        # there's no path context — this is Markdown formatting
+        if i < 0:
+            return True
+
+        # Check the character before the word run
+        char_before_word = line[i]
+        if char_before_word in ("/", "\\"):
+            # Path separator found — this is a glob pattern, NOT markdown
+            return False
+
+        return True
+
     def _scan_permissions(
         self,
         content: str,
@@ -685,6 +739,20 @@ class PermAuditScanner(BaseScanner):
         for pattern_name, pattern, confidence in _PERMISSION_PATTERNS:
             for line_num, line in enumerate(lines, start=1):
                 for match in pattern.finditer(line):
+                    # Skip asterisks that are Markdown formatting
+                    match_text = match.group(0)
+                    star_offset = match_text.find("*")
+                    if star_offset >= 0 and self._is_markdown_formatting(
+                        line, match.start() + star_offset
+                    ):
+                        logger.debug(
+                            "markdown_formatting_exclusion",
+                            artifact_path=artifact_path,
+                            line=line_num,
+                            pattern=pattern_name,
+                            match=match_text,
+                        )
+                        continue
                     risk_id = _PERMISSION_RISK_MAP.get(artifact_type, "SK-S1")
                     findings.append(
                         self._create_finding(
@@ -726,6 +794,19 @@ class PermAuditScanner(BaseScanner):
             for line_num, line in enumerate(lines, start=1):
                 for match in pattern.finditer(line):
                     evidence = match.group(0)
+                    # Skip asterisks that are Markdown formatting
+                    star_offset = evidence.find("*")
+                    if star_offset >= 0 and self._is_markdown_formatting(
+                        line, match.start() + star_offset
+                    ):
+                        logger.debug(
+                            "markdown_formatting_exclusion",
+                            artifact_path=artifact_path,
+                            line=line_num,
+                            pattern=pattern_name,
+                            match=evidence,
+                        )
+                        continue
                     # "Root filesystem access": a quoted slash '/' or "/" used as a
                     # standalone YAML path value (route prefix, array item) is NOT
                     # a dangerous open/read/write of the root filesystem.  Only flag
