@@ -72,10 +72,17 @@ class Validator:
         # Initialize structured logging with the configured log level
         configure_logging(log_level=self._config.log_level)
 
+        # Wire the global semantic enabled state BEFORE creating classifiers
+        # or scanner registry so that all consumers see the correct value.
+        from ai_artifact_risk_validator.semantic.embeddings import get_shared_engine
+
+        get_shared_engine().set_enabled(self._config.semantic.enabled)
+
         self._config_manager = ConfigManager()
         self._file_discovery = FileDiscovery(config=self._config)
         self._classifier = ArtifactClassifier(
-            custom_patterns=self._config.custom_artifact_patterns or None
+            custom_patterns=self._config.custom_artifact_patterns or None,
+            semantic_enabled=self._config.semantic.enabled,
         )
         self._scanner_registry = ScannerRegistry(config=self._config)
         self._pipeline_executor = PipelineExecutor(config=self._config)

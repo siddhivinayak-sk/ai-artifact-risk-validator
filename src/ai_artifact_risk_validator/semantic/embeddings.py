@@ -46,9 +46,22 @@ class EmbeddingEngine:
         self._model: Any = None
         self._cache_dir = cache_dir
         self._available: bool | None = None
+        self._globally_enabled: bool = True
         # Per-instance lock prevents parallel scanner threads racing to
         # load the model simultaneously (double-checked locking pattern).
         self._model_load_lock = threading.Lock()
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Set the global enabled state for semantic features.
+
+        When disabled, :attr:`is_available` returns ``False`` regardless
+        of whether ``sentence-transformers`` is installed.
+
+        Args:
+            enabled: ``True`` to allow semantic features (default),
+                ``False`` to force them off (e.g. ``--no-semantic``).
+        """
+        self._globally_enabled = enabled
 
     @property
     def model_name(self) -> str:
@@ -57,10 +70,15 @@ class EmbeddingEngine:
 
     @property
     def is_available(self) -> bool:
-        """Check if sentence-transformers is installed.
+        """Check if semantic features are globally enabled and sentence-transformers is installed.
 
-        Lazily probes for the import on first access and caches the result.
+        Returns ``False`` when :meth:`set_enabled` has been called with
+        ``False`` (e.g. via ``--no-semantic``), even if the library is
+        installed. Lazily probes for the import on first access and caches
+        the result.
         """
+        if not self._globally_enabled:
+            return False
         if self._available is None:
             try:
                 import sentence_transformers  # noqa: F401
