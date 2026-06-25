@@ -14,6 +14,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+import structlog
+
 from ai_artifact_risk_validator.models import (
     ArtifactType,
     FindingLocation,
@@ -25,6 +27,8 @@ from ai_artifact_risk_validator.models import (
     SeverityLabel,
 )
 from ai_artifact_risk_validator.scanners.base import BaseScanner
+
+logger = structlog.get_logger(__name__)
 
 # ============================================================
 # Contradiction Detection Patterns
@@ -784,6 +788,10 @@ class ComposeAnalyzeScanner(BaseScanner):
 
         Looks for self-references and potential circular dependency patterns.
         When networkx is available, builds and analyzes the dependency graph.
+
+        Requires explicit file path references, import/include statements,
+        or structured field references. Excludes keyword-only self-references
+        where a file about a topic merely contains that topic word.
         """
         findings: list[ScanFinding] = []
 
@@ -812,13 +820,33 @@ class ComposeAnalyzeScanner(BaseScanner):
 
         # Check if any reference points back to this artifact
         for ref_line, ref_name in references:
+            ref_normalized = ref_name.lower().strip().rstrip("/")
+            has_path_separator = "/" in ref_normalized or "\\" in ref_normalized
+            has_structured_field = self._is_structured_reference(content, ref_line, ref_name)
+            has_import_statement = self._is_import_include_reference(content, ref_line, ref_name)
+
+            # Check if this is merely a keyword self-reference
+            if not has_path_separator and not has_structured_field and not has_import_statement:
+                # This is a keyword-only match — exclude it
+                logger.debug(
+                    "keyword_self_reference_exclusion",
+                    artifact_name=artifact_name,
+                    reference=ref_name,
+                    line=ref_line,
+                    artifact_path=artifact_path,
+                )
+                continue
+
             if self._references_match(artifact_name, ref_name):
                 findings.append(
                     self._create_finding(
                         risk_id=risk_id,
                         artifact_type=artifact_type,
                         artifact_path=artifact_path,
-                        evidence=f"Potential circular reference: artifact references itself via '{ref_name}'",
+                        evidence=(
+                            f"Potential circular reference: artifact references"
+                            f" itself via '{ref_name}'"
+                        ),
                         confidence=0.85,
                         line=ref_line,
                     )
@@ -833,6 +861,49 @@ class ComposeAnalyzeScanner(BaseScanner):
             findings.extend(cycle_findings)
 
         return findings
+
+    def _is_structured_reference(self, content: str, ref_line: int, ref_name: str) -> bool:
+        """Check if a reference appears in a structured field context.
+
+        Returns True when the reference is part of a YAML/JSON structured field
+        like ref:, depends_on:, source:, target:, dependency:, include:.
+        """
+        lines = content.split("\n")
+        # ref_line is 1-based from _find_line_number
+        line_idx = ref_line - 1 if ref_line > 0 else 0
+        if line_idx >= len(lines):
+            return False
+
+        line_text = lines[line_idx]
+        # Check if the line contains a structured field keyword before the ref
+        structured_field_pattern = re.compile(
+            r"(?:ref|reference|source|target|dependency|depends_on|include)"
+            r"\s*:\s*.*" + re.escape(ref_name),
+            re.IGNORECASE,
+        )
+        return bool(structured_field_pattern.search(line_text))
+
+    def _is_import_include_reference(self, content: str, ref_line: int, ref_name: str) -> bool:
+        """Check if a reference is part of an import/include statement.
+
+        Returns True when the reference appears in a line with an explicit
+        dependency verb (uses, requires, depends on, imports, includes,
+        invokes, delegates to, calls) directly followed by the artifact name.
+        """
+        lines = content.split("\n")
+        # ref_line is 1-based from _find_line_number
+        line_idx = ref_line - 1 if ref_line > 0 else 0
+        if line_idx >= len(lines):
+            return False
+
+        line_text = lines[line_idx]
+        # Check for explicit dependency verb + artifact name
+        import_pattern = re.compile(
+            r"\b(?:uses?|requires?|depends\s+on|imports?|includes?"
+            r"|invokes?|delegates?\s+to|calls?)\s+['\"`]?" + re.escape(ref_name),
+            re.IGNORECASE,
+        )
+        return bool(import_pattern.search(line_text))
 
     def _detect_cycles_with_networkx(
         self,
@@ -1050,13 +1121,38 @@ class ComposeAnalyzeScanner(BaseScanner):
         return name.lower()
 
     def _references_match(self, artifact_name: str, reference: str) -> bool:
-        """Check if a reference potentially points back to the artifact itself."""
+        """Check if a reference points back to the artifact via explicit means.
+
+        Requires one of the following for a match:
+        - Explicit file path reference (containing `/` or `\\` separators)
+          with a matching basename
+        - Import/include statement referencing the artifact by name
+        - Artifact name reference in a structured field (YAML ref:, depends_on:)
+
+        Excludes keyword-only self-references where a file about a topic
+        merely contains that topic word.
+        """
         ref_normalized = reference.lower().strip().rstrip("/")
-        # Direct name match
-        if artifact_name in ref_normalized or ref_normalized in artifact_name:
+
+        # Check for explicit file path reference (contains path separators)
+        has_path_separator = "/" in ref_normalized or "\\" in ref_normalized
+        if has_path_separator:
+            # Path-based match: last segment must match artifact name
+            ref_parts = re.split(r"[/\\]", ref_normalized)
+            basename = ref_parts[-1] if ref_parts else ""
+            # Strip common extensions from basename for comparison
+            basename_no_ext = re.sub(
+                r"\.(md|yaml|yml|json|py|ts|js)$", "", basename, flags=re.IGNORECASE
+            )
+            if basename_no_ext == artifact_name or basename == artifact_name:
+                return True
+            return False
+
+        # Check for import/include statement pattern match
+        # The reference was extracted by _REFERENCE_PATTERNS which include
+        # import/include/uses/requires/depends_on patterns and YAML ref: fields.
+        # For non-path references, require an exact name match (not substring).
+        if ref_normalized == artifact_name:
             return True
-        # Path-based match (last segment)
-        ref_parts = re.split(r"[/\\]", ref_normalized)
-        if ref_parts and ref_parts[-1] == artifact_name:
-            return True
+
         return False

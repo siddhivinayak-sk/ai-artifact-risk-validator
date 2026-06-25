@@ -11,7 +11,10 @@ from __future__ import annotations
 
 import ast
 import re
+from dataclasses import dataclass
 from typing import Any
+
+import structlog
 
 from ai_artifact_risk_validator.models import (
     ArtifactType,
@@ -24,12 +27,15 @@ from ai_artifact_risk_validator.models import (
     SeverityLabel,
 )
 from ai_artifact_risk_validator.models.language import DetectedLanguage
+from ai_artifact_risk_validator.scanners._markdown_context import MarkdownFenceTracker
 from ai_artifact_risk_validator.scanners.base import BaseScanner
 from ai_artifact_risk_validator.scanners.generic_language_scanner import GenericLanguageScanner
 from ai_artifact_risk_validator.scanners.java_analyzer import JavaAnalyzer
 from ai_artifact_risk_validator.scanners.language_detector import LanguageDetector
 from ai_artifact_risk_validator.scanners.rust_analyzer import RustAnalyzer
 from ai_artifact_risk_validator.scanners.tsjs_enhanced import TSJSEnhancedPatterns
+
+logger = structlog.get_logger(__name__)
 
 # --- Risk metadata lookup ---
 _RISK_METADATA: dict[str, dict[str, Any]] = {
@@ -173,6 +179,18 @@ _RISK_METADATA: dict[str, dict[str, Any]] = {
         "description": "Agent has access to a combination of tools that together enable dangerous operations not intended individually.",
         "remediation": "Audit tool combinations for emergent risks. Implement tool interaction policies. Restrict dangerous combinations.",
     },
+    # Destructive operation risks
+    "A-S6": {
+        "title": "Destructive Operations in Agent",
+        "severity_score": 9,
+        "severity_label": SeverityLabel.CRITICAL,
+        "priority": Priority.P0,
+        "gate_action": GateAction.BLOCK,
+        "category": RiskCategory.SECURITY,
+        "description": "Agent configuration enables destructive system operations.",
+        "remediation": "Remove destructive capabilities. Require explicit user "
+        "confirmation for dangerous actions.",
+    },
     # Rogue Agent risks
     "RA-S1": {
         "title": "Rogue Agent: Persistent Code Modification",
@@ -288,6 +306,15 @@ _INSECURE_COMM_RISK_MAP: dict[ArtifactType, str] = {
     ArtifactType.HOOK: "H-S5",
     ArtifactType.PLUGIN: "PL-S9",
     ArtifactType.AGENT: "A-S7",
+}
+
+# Destructive operation risk mapping
+_DESTRUCTIVE_OP_RISK_MAP: dict[ArtifactType, str] = {
+    ArtifactType.SKILL: "SK-S2",
+    ArtifactType.MCP: "MCP-S1",
+    ArtifactType.HOOK: "H-S1",
+    ArtifactType.PLUGIN: "PL-S1",
+    ArtifactType.AGENT: "A-S6",
 }
 
 # --- Dangerous function names ---
@@ -420,6 +447,225 @@ _RE_ENCODED_EXEC = re.compile(
     r"(exec|eval|compile)\s*\(\s*(base64\.b64decode|base64\.decodebytes|binascii\.unhexlify|urllib\.parse\.unquote)\s*\(",
     re.IGNORECASE,
 )
+
+# Ruby-style backtick command execution: `command` on a single line
+# Matches a single backtick pair enclosing a command string (not triple backticks)
+_RE_BACKTICK_EXEC = re.compile(
+    r"(?<!`)(`[^`\n]+`)(?!`)",
+)
+
+# Destructive keyword pattern — matches common destructive operation keywords
+# Used with _has_code_context() to filter prose occurrences
+_RE_DESTRUCTIVE_KEYWORDS = re.compile(
+    r"\b(truncate|halt|drop|kill|shutdown|reboot|poweroff"
+    r"|rm\s+-rf|rmdir|deltree|format)\b",
+    re.IGNORECASE,
+)
+
+# Shell prompt indicators at line start: "$ ", "> ", "# "
+_RE_SHELL_PROMPT = re.compile(r"^\s*(\$|>|#)\s")
+
+# --- Python docstring/comment detection ---
+
+# Triple-quote patterns for docstring region detection
+_TRIPLE_QUOTE_PATTERNS: list[str] = ['"""', "'''"]
+
+
+@dataclass
+class DocstringRegion:
+    """Represents a Python docstring region."""
+
+    start_line: int  # 1-based
+    end_line: int  # 1-based
+    quote_style: str  # '"""' or "'''"
+
+
+def _is_in_docstring(content: str, line_num: int) -> bool:
+    """Check if a line is inside a Python docstring or is a comment line.
+
+    Tracks triple-quote regions (both \"\"\" and ''') as docstring zones,
+    and identifies # comment lines.
+
+    Args:
+        content: The full Python source content.
+        line_num: 1-based line number to check.
+
+    Returns:
+        True if the line is inside a docstring region or is a comment line.
+    """
+    lines = content.splitlines()
+
+    if line_num < 1 or line_num > len(lines):
+        return False
+
+    target_line = lines[line_num - 1]
+
+    # Check if the line is a comment line (starts with # after optional whitespace)
+    stripped = target_line.lstrip()
+    if stripped.startswith("#"):
+        return True
+
+    # Compute docstring regions and check if line_num falls inside one
+    regions = _compute_docstring_regions(lines)
+    for region in regions:
+        if region.start_line <= line_num <= region.end_line:
+            return True
+
+    return False
+
+
+def _compute_docstring_regions(lines: list[str]) -> list[DocstringRegion]:
+    """Parse Python source lines and identify triple-quoted docstring regions.
+
+    Handles both \"\"\" and ''' styles. Unmatched triple-quotes extend
+    to end-of-file (conservative approach to avoid false positives).
+
+    Args:
+        lines: List of source code lines (0-indexed).
+
+    Returns:
+        List of DocstringRegion instances representing docstring zones.
+    """
+    regions: list[DocstringRegion] = []
+    total_lines = len(lines)
+    i = 0
+
+    while i < total_lines:
+        line = lines[i]
+        # Check for triple-quote opener on this line
+        opener_info = _find_triple_quote_opener(line, i, regions)
+        if opener_info is not None:
+            quote_style, col_offset = opener_info
+            # Check if the closing triple-quote is on the same line
+            # (after the opener position)
+            after_opener = line[col_offset + 3 :]
+            close_pos = after_opener.find(quote_style)
+            if close_pos != -1:
+                # Single-line docstring: opens and closes on same line
+                regions.append(
+                    DocstringRegion(
+                        start_line=i + 1,
+                        end_line=i + 1,
+                        quote_style=quote_style,
+                    )
+                )
+                i += 1
+            else:
+                # Multi-line docstring: find the closing triple-quote
+                closer_line = _find_docstring_closer(lines, i + 1, quote_style)
+                if closer_line is None:
+                    # Unmatched: extend to end-of-file (conservative)
+                    logger.debug(
+                        "docstring_unmatched_triple_quote",
+                        opener_line=i + 1,
+                        quote_style=quote_style,
+                    )
+                    regions.append(
+                        DocstringRegion(
+                            start_line=i + 1,
+                            end_line=total_lines,
+                            quote_style=quote_style,
+                        )
+                    )
+                    break
+                else:
+                    regions.append(
+                        DocstringRegion(
+                            start_line=i + 1,
+                            end_line=closer_line,
+                            quote_style=quote_style,
+                        )
+                    )
+                    i = closer_line  # Move past the closer (0-based index)
+        else:
+            i += 1
+
+    return regions
+
+
+def _find_triple_quote_opener(
+    line: str,
+    line_index: int,
+    existing_regions: list[DocstringRegion],
+) -> tuple[str, int] | None:
+    """Find the first triple-quote opener on a line that isn't already in a region.
+
+    Checks for both \"\"\" and ''' patterns. Skips triple-quotes that appear
+    after a # comment character (they're part of a comment, not a docstring).
+
+    Args:
+        line: The source line to examine.
+        line_index: 0-based index of this line.
+        existing_regions: Already-identified regions to avoid double-counting.
+
+    Returns:
+        Tuple of (quote_style, column_offset) or None if no opener found.
+    """
+    # Find the comment start position (if any) to avoid matching in comments
+    comment_pos = _find_comment_position(line)
+
+    # Search for triple quotes, checking both styles
+    best_match: tuple[str, int] | None = None
+
+    for quote_style in _TRIPLE_QUOTE_PATTERNS:
+        pos = line.find(quote_style)
+        if pos != -1 and (comment_pos is None or pos < comment_pos):
+            if best_match is None or pos < best_match[1]:
+                best_match = (quote_style, pos)
+
+    return best_match
+
+
+def _find_comment_position(line: str) -> int | None:
+    """Find the position of the first # that starts a comment (not inside a string).
+
+    Uses a simple state machine to track whether we're inside a string literal.
+
+    Args:
+        line: Source line to examine.
+
+    Returns:
+        Column position of the comment start, or None if no comment.
+    """
+    in_string: str | None = None  # Current string delimiter or None
+    i = 0
+    while i < len(line):
+        ch = line[i]
+        if in_string is not None:
+            # Inside a string - look for the closing delimiter
+            if ch == "\\" and i + 1 < len(line):
+                i += 2  # Skip escaped character
+                continue
+            if ch == in_string:
+                in_string = None
+        else:
+            # Outside a string
+            if ch == "#":
+                return i
+            if ch in ('"', "'"):
+                # Check for triple-quote
+                if line[i : i + 3] in ('"""', "'''"):
+                    return None  # Triple-quote found, not a comment
+                in_string = ch
+        i += 1
+    return None
+
+
+def _find_docstring_closer(lines: list[str], start_index: int, quote_style: str) -> int | None:
+    """Find the line containing the closing triple-quote for a docstring.
+
+    Args:
+        lines: All source lines (0-indexed).
+        start_index: 0-based index to start searching from (line after opener).
+        quote_style: The quote style to match ('\"\"\"' or \"'''\").
+
+    Returns:
+        1-based line number of the closer, or None if unmatched.
+    """
+    for j in range(start_index, len(lines)):
+        if quote_style in lines[j]:
+            return j + 1  # Convert to 1-based
+    return None
 
 
 class _ASTDangerousCallVisitor(ast.NodeVisitor):
@@ -794,6 +1040,7 @@ class CodeAuditScanner(BaseScanner):
             "PL-S5",
             "PL-S9",
             "A-S3",
+            "A-S6",
             "A-S7",
             "RA-S1",
             "RA-S2",
@@ -1042,6 +1289,8 @@ class CodeAuditScanner(BaseScanner):
         """Perform regex-based analysis on non-Python content.
 
         Used as fallback for non-Python artifacts or when AST parsing fails.
+        Integrates MarkdownFenceTracker to exclude backtick execution matches
+        on lines that are fence boundaries or inside a code fence.
 
         Args:
             content: File content to scan.
@@ -1053,6 +1302,9 @@ class CodeAuditScanner(BaseScanner):
         """
         findings: list[ScanFinding] = []
         lines = content.splitlines()
+
+        # Pre-parse Markdown code fence regions for backtick execution filtering
+        fence_tracker = MarkdownFenceTracker(lines)
 
         for line_num, line in enumerate(lines, start=1):
             # Dangerous function calls
@@ -1081,7 +1333,7 @@ class CodeAuditScanner(BaseScanner):
                         evidence=match.group(0).strip(),
                         confidence=0.85,
                         line=line_num,
-                        detail=f"Command execution detected: {match.group(0).strip()}",
+                        detail=(f"Command execution detected: {match.group(0).strip()}"),
                     )
                 )
 
@@ -1111,7 +1363,7 @@ class CodeAuditScanner(BaseScanner):
                         evidence=match.group(0).strip(),
                         confidence=0.85,
                         line=line_num,
-                        detail=f"Unsafe deserialization: {match.group(0).strip()}",
+                        detail=(f"Unsafe deserialization: {match.group(0).strip()}"),
                     )
                 )
 
@@ -1156,7 +1408,7 @@ class CodeAuditScanner(BaseScanner):
                         evidence=match.group(0).strip()[:100],
                         confidence=0.80,
                         line=line_num,
-                        detail="Dynamic import with potentially user-controlled input",
+                        detail=("Dynamic import with potentially user-controlled input"),
                     )
                 )
 
@@ -1186,11 +1438,142 @@ class CodeAuditScanner(BaseScanner):
                         evidence=match.group(0).strip(),
                         confidence=0.82,
                         line=line_num,
-                        detail=f"Privilege escalation: {match.group(0).strip()}",
+                        detail=(f"Privilege escalation: {match.group(0).strip()}"),
                     )
                 )
 
+            # Backtick command execution (Ruby-style `command`)
+            # Skip lines that are fence boundaries or inside a fence
+            if fence_tracker.is_fence_boundary(line_num) or fence_tracker.is_in_fence(line_num):
+                # Only log if this line would have matched backtick execution
+                if _RE_BACKTICK_EXEC.search(line):
+                    logger.debug(
+                        "markdown_fence_exclusion",
+                        line_num=line_num,
+                        artifact_path=artifact_path,
+                        reason="line is fence boundary or inside fence",
+                    )
+            else:
+                for match in _RE_BACKTICK_EXEC.finditer(line):
+                    risk_id = _SUBPROCESS_RISK_MAP.get(artifact_type, "MCP-S1")
+                    findings.append(
+                        self._create_finding(
+                            risk_id=risk_id,
+                            artifact_type=artifact_type,
+                            artifact_path=artifact_path,
+                            evidence=match.group(0).strip()[:100],
+                            confidence=0.85,
+                            line=line_num,
+                            detail=(
+                                "Backtick command execution detected: "
+                                f"{match.group(0).strip()[:50]}"
+                            ),
+                        )
+                    )
+
+            # Destructive operation detection with code context filter
+            for match in _RE_DESTRUCTIVE_KEYWORDS.finditer(line):
+                keyword = match.group(1)
+                if self._has_code_context(keyword, line, line_num, fence_tracker):
+                    risk_id = _DESTRUCTIVE_OP_RISK_MAP.get(artifact_type, "A-S6")
+                    findings.append(
+                        self._create_finding(
+                            risk_id=risk_id,
+                            artifact_type=artifact_type,
+                            artifact_path=artifact_path,
+                            evidence=match.group(0).strip()[:100],
+                            confidence=0.88,
+                            line=line_num,
+                            detail=(f"Destructive operation detected: {keyword}"),
+                        )
+                    )
+
         return findings
+
+    def _has_code_context(
+        self,
+        keyword: str,
+        line: str,
+        line_num: int,
+        fence_tracker: MarkdownFenceTracker,
+    ) -> bool:
+        """Check whether a destructive keyword match occurs in a code context.
+
+        Returns True if the keyword appears in any of these contexts:
+        - Inside a Markdown code block (per MarkdownFenceTracker)
+        - In a function call pattern (keyword followed by '(' or preceded by 'module.')
+        - After a shell prompt indicator ('$ ', '> ', '# ' at line start)
+
+        If none of these contexts apply, the match is in prose and should be
+        excluded from destructive operation detection.
+
+        Args:
+            keyword: The destructive keyword that was matched.
+            line: The full text of the line containing the match.
+            line_num: 1-based line number.
+            fence_tracker: Pre-computed MarkdownFenceTracker for the content.
+
+        Returns:
+            True if the keyword is in a code context (should produce a finding),
+            False if it is in prose context (should be excluded).
+        """
+        # Check 1: Inside a Markdown code fence
+        if fence_tracker.is_in_fence(line_num) or fence_tracker.is_fence_boundary(line_num):
+            return True
+
+        # Early exit: Markdown structural lines (headings, bullets) are prose
+        stripped = line.lstrip()
+        # Markdown heading: 1-6 '#' characters followed by a space
+        if stripped.startswith("#") and not stripped.startswith("#!"):
+            hash_count = len(stripped) - len(stripped.lstrip("#"))
+            if 1 <= hash_count <= 6 and len(stripped) > hash_count and stripped[hash_count] == " ":
+                return False
+        # Markdown bullet points: lines starting with "- ", "* ", "+ "
+        if stripped.startswith(("- ", "* ", "+ ")):
+            return False
+
+        # Check 2: Function call pattern
+        # keyword followed by '(' — e.g., truncate(, drop(
+        keyword_lower = keyword.lower()
+
+        # Pattern: keyword( — direct function call
+        func_call_pattern = re.compile(rf"\b{re.escape(keyword_lower)}\s*\(", re.IGNORECASE)
+        if func_call_pattern.search(line):
+            return True
+
+        # Pattern: module.keyword( — qualified function call (e.g., os.truncate()
+        qualified_call_pattern = re.compile(
+            rf"\w+\.\s*{re.escape(keyword_lower)}\s*\(", re.IGNORECASE
+        )
+        if qualified_call_pattern.search(line):
+            return True
+
+        # Pattern: SQL-style command — e.g., TRUNCATE TABLE, DROP DATABASE
+        sql_command_pattern = re.compile(rf"\b{re.escape(keyword_lower)}\s+\w+", re.IGNORECASE)
+        if sql_command_pattern.search(line):
+            # Additional check: ensure it's not just prose (e.g., "truncate the results")
+            # SQL commands are typically uppercase or followed by known SQL nouns
+            sql_nouns = {"table", "database", "index", "column", "schema", "view"}
+            after_match = re.search(rf"\b{re.escape(keyword_lower)}\s+(\w+)", line, re.IGNORECASE)
+            if after_match:
+                following_word = after_match.group(1).lower()
+                if following_word in sql_nouns:
+                    return True
+
+        # Check 3: Shell prompt indicator at line start
+        # Note: Markdown headings are already excluded by the early exit above
+        if _RE_SHELL_PROMPT.match(line):
+            return True
+
+        # None of the code contexts matched — this is prose
+        log = logger.bind(
+            event="prose_context_exclusion",
+            keyword=keyword,
+            line_num=line_num,
+            line_preview=line.strip()[:80],
+        )
+        log.debug("Destructive keyword excluded: prose context detected")
+        return False
 
     def _scan_rogue_agent(
         self,
@@ -1216,6 +1599,13 @@ class CodeAuditScanner(BaseScanner):
                 )
             m2 = _RE_ROGUE_PERSISTENCE.search(line)
             if m2:
+                if _is_in_docstring(artifact_content, line_num):
+                    logger.debug(
+                        "docstring_exclusion",
+                        artifact_path=artifact_path,
+                        line_num=line_num,
+                    )
+                    continue
                 findings.append(
                     self._create_finding(
                         risk_id="RA-S2",
