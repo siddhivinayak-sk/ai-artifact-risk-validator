@@ -169,6 +169,7 @@ class TestDataResidencyDetection:
         """Residency concern confidence should be 0.70-0.85."""
         content = """
         region: eu-west-1
+        Data will be replicated to the backup region.
         """
         findings = scanner.scan(content, ArtifactType.AGENT, "agent.yaml")
         reg1_findings = [f for f in findings if f.id == "REG-1"]

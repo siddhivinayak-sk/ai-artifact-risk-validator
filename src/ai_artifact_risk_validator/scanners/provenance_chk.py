@@ -8,10 +8,13 @@ for enhanced verification.
 
 from __future__ import annotations
 
+import fnmatch
 import json
 import re
 from datetime import datetime, timezone
 from typing import Any
+
+import structlog
 
 from ai_artifact_risk_validator.models import (
     ArtifactType,
@@ -24,6 +27,8 @@ from ai_artifact_risk_validator.models import (
     SeverityLabel,
 )
 from ai_artifact_risk_validator.scanners.base import BaseScanner
+
+logger = structlog.get_logger(__name__)
 
 # --- Risk metadata lookup ---
 _RISK_METADATA: dict[str, dict[str, Any]] = {
@@ -238,6 +243,86 @@ _DATE_EXTRACTION_PATTERNS: list[re.Pattern[str]] = [
 ]
 
 
+# --- Path classification patterns for scope restriction ---
+# Patterns for test/spec/workflow directories (first-party, skip provenance entirely)
+_FIRST_PARTY_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"(^|[\\/])tests?[\\/]"),  # tests/ or test/
+    re.compile(r"(^|[\\/])__tests__[\\/]"),  # __tests__/
+    re.compile(r"(^|[\\/])spec[\\/]"),  # spec/
+    re.compile(r"[\\/]\.kiro[\\/]specs[\\/]"),  # .kiro/specs/
+    re.compile(r"[\\/]\.kiro[\\/]workflows[\\/]"),  # .kiro/workflows/
+]
+
+# Patterns for documentation directories (downgrade severity to INFO)
+_DOCUMENTATION_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"(^|[\\/])docs?[\\/]"),  # doc/ or docs/
+    re.compile(r"(^|[\\/])documentation[\\/]"),  # documentation/
+]
+
+# Patterns for external/vendor directories (retain full severity)
+_EXTERNAL_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(r"(^|[\\/])plugins?[\\/]"),  # plugin/ or plugins/
+    re.compile(r"(^|[\\/])vendor[\\/]"),  # vendor/
+    re.compile(r"(^|[\\/])node_modules[\\/]"),  # node_modules/
+    re.compile(r"(^|[\\/])external[\\/]"),  # external/
+]
+
+
+def _is_test_or_spec_path(artifact_path: str) -> bool:
+    """Check if the file path matches a test or spec directory pattern.
+
+    Files in test/spec directories are first-party versioned files that do not
+    need provenance or integrity verification.
+
+    Args:
+        artifact_path: Path to the artifact file.
+
+    Returns:
+        True if the path matches any first-party test/spec pattern.
+    """
+    for pattern in _FIRST_PARTY_PATTERNS:
+        if pattern.search(artifact_path):
+            return True
+    return False
+
+
+def _is_documentation_path(artifact_path: str) -> bool:
+    """Check if the file path is under a documentation directory.
+
+    Documentation files get reduced severity (INFO) for provenance findings
+    rather than being skipped entirely.
+
+    Args:
+        artifact_path: Path to the artifact file.
+
+    Returns:
+        True if the path matches any documentation directory pattern.
+    """
+    for pattern in _DOCUMENTATION_PATTERNS:
+        if pattern.search(artifact_path):
+            return True
+    return False
+
+
+def _is_external_path(artifact_path: str) -> bool:
+    """Check if the file path matches an external/vendor directory pattern.
+
+    External files (plugins, vendor, node_modules) are considered
+    externally-sourced and retain full High/Critical severity for
+    provenance and integrity findings.
+
+    Args:
+        artifact_path: Path to the artifact file.
+
+    Returns:
+        True if the path matches any external/vendor directory pattern.
+    """
+    for pattern in _EXTERNAL_PATTERNS:
+        if pattern.search(artifact_path):
+            return True
+    return False
+
+
 def _has_pattern_match(content: str, patterns: list[re.Pattern[str]]) -> bool:
     """Check if any of the patterns match in the content.
 
@@ -305,6 +390,46 @@ class ProvenanceChkScanner(BaseScanner):
         self._git_loaded = False
         self._cryptography: Any | None = None
         self._cryptography_loaded = False
+        self._config_first_party_patterns: list[str] = []
+
+    def set_first_party_patterns(self, patterns: list[str]) -> None:
+        """Set configurable first-party path patterns from ValidatorConfig.
+
+        These patterns use glob syntax (e.g. ``tests/**``, ``src/**``) and
+        extend the built-in ``_FIRST_PARTY_PATTERNS`` when checking whether
+        a file should be exempt from provenance/integrity scanning.
+
+        Args:
+            patterns: List of glob patterns identifying first-party paths.
+        """
+        self._config_first_party_patterns = patterns
+
+    def _is_first_party_by_config(self, artifact_path: str) -> bool:
+        """Check if the artifact path matches any config-defined first-party pattern.
+
+        Uses fnmatch-style glob matching against path components. Normalises
+        the path to forward slashes for consistent matching.
+
+        Args:
+            artifact_path: Path to the artifact file.
+
+        Returns:
+            True if the path matches any configured first-party pattern.
+        """
+        if not self._config_first_party_patterns:
+            return False
+        # Normalise to forward slashes for consistent matching
+        normalised = artifact_path.replace("\\", "/")
+        for pattern in self._config_first_party_patterns:
+            # Match against the full path and also relative path fragments
+            if fnmatch.fnmatch(normalised, pattern):
+                return True
+            if fnmatch.fnmatch(normalised, "*/" + pattern):
+                return True
+            # Also match basename-only patterns against any path component
+            if "/" not in pattern and fnmatch.fnmatch(normalised.split("/")[-1], pattern):
+                return True
+        return False
 
     @property
     def name(self) -> ScannerModule:
@@ -834,6 +959,9 @@ class ProvenanceChkScanner(BaseScanner):
         provenance, integrity, and signature checks because those checks
         apply to server *artifacts*, not to client connection configs.
 
+        Phase 2: Path-based scope restriction skips test/spec paths entirely
+        and downgrades documentation paths to INFO severity.
+
         Args:
             artifact_content: The full text content of the artifact.
             artifact_type: Classified type of the artifact.
@@ -842,6 +970,13 @@ class ProvenanceChkScanner(BaseScanner):
         Returns:
             List of ScanFinding objects (may be empty).
         """
+        # Phase 2: Path-based scope restriction
+        if _is_test_or_spec_path(artifact_path) or self._is_first_party_by_config(artifact_path):
+            logger.debug("test_path_provenance_skip", path=artifact_path)
+            return []
+
+        is_doc_path = _is_documentation_path(artifact_path)
+
         findings: list[ScanFinding] = []
 
         # Skip provenance/integrity/signature checks for MCP client config files.
@@ -879,6 +1014,17 @@ class ProvenanceChkScanner(BaseScanner):
 
         # 7. Optional: git-based provenance checking
         findings.extend(self._check_git_provenance(artifact_path, artifact_type))
+
+        # Phase 2: Downgrade documentation path findings to INFO severity
+        if is_doc_path:
+            for finding in findings:
+                finding.severity_score = min(finding.severity_score, 4)
+                finding.gate_action = GateAction.INFO
+            logger.debug(
+                "doc_path_severity_downgrade",
+                path=artifact_path,
+                findings_count=len(findings),
+            )
 
         return findings
 
