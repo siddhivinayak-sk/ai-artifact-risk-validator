@@ -51,6 +51,7 @@ def cli() -> None:
 )
 @click.option(
     "--format",
+    "-f",
     "output_format",
     type=click.Choice(["json", "text", "html", "sarif", "markdown"], case_sensitive=False),
     default="text",

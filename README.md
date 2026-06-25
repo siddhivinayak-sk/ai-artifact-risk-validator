@@ -37,7 +37,7 @@ Key features:
 - **Parallel execution** — concurrent file and scanner processing for fast scans
 - **Configurable gates** — BLOCK/WARN/INFO decisions with confidence-based downgrade
 - **Semantic analysis** — Optional embedding-based detection using sentence-transformers for paraphrased attack detection, compliance gap analysis, and false positive reduction
-- **Multiple output formats** — JSON, rich terminal text, HTML, and SARIF v2.1.0 reports
+- **Multiple output formats** — JSON, rich terminal text, HTML, Markdown, and SARIF v2.1.0 reports
 - **CI/CD integration** — exit codes map to gate decisions (0=PASS, 1=BLOCK, 2=WARN)
 - **False positive management** — inline suppression comments, config-based rules, and built-in scanner-level filters (see below)
 
@@ -284,6 +284,15 @@ ai-artifact-validator verify ./my-artifacts --format sarif
 
 # Save SARIF report to file
 ai-artifact-validator verify ./my-artifacts --format sarif --output report.sarif
+
+# Output as Markdown
+ai-artifact-validator verify ./my-artifacts --format markdown
+
+# Save Markdown report to file
+ai-artifact-validator verify ./my-artifacts --format markdown --output report.md
+
+# Disable scan result caching
+ai-artifact-validator verify ./my-artifacts --no-cache
 
 # --- Dynamic MCP scanning ---
 
