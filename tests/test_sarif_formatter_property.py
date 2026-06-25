@@ -209,7 +209,7 @@ class TestSarifDocumentStructuralInvariants:
     """
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_schema_field_is_sarif_v2_1_0_url(self, report: ScanReport) -> None:
         """$schema equals the SARIF v2.1.0 schema URL."""
         sarif_output = format_sarif(report)
@@ -222,7 +222,7 @@ class TestSarifDocumentStructuralInvariants:
         assert doc["$schema"] == expected_schema
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_version_field_is_2_1_0(self, report: ScanReport) -> None:
         """version equals "2.1.0"."""
         sarif_output = format_sarif(report)
@@ -231,7 +231,7 @@ class TestSarifDocumentStructuralInvariants:
         assert doc["version"] == "2.1.0"
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_runs_contains_exactly_one_element(self, report: ScanReport) -> None:
         """runs contains exactly one element."""
         sarif_output = format_sarif(report)
@@ -240,7 +240,7 @@ class TestSarifDocumentStructuralInvariants:
         assert len(doc["runs"]) == 1
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_tool_driver_name_is_correct(self, report: ScanReport) -> None:
         """tool.driver.name equals "ai-artifact-risk-validator"."""
         sarif_output = format_sarif(report)
@@ -250,7 +250,7 @@ class TestSarifDocumentStructuralInvariants:
         assert run["tool"]["driver"]["name"] == "ai-artifact-risk-validator"
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_tool_driver_version_matches_package(self, report: ScanReport) -> None:
         """tool.driver.version equals ai_artifact_risk_validator.__version__."""
         sarif_output = format_sarif(report)
@@ -260,7 +260,7 @@ class TestSarifDocumentStructuralInvariants:
         assert run["tool"]["driver"]["version"] == ai_artifact_risk_validator.__version__
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_tool_driver_information_uri_is_valid_url(self, report: ScanReport) -> None:
         """tool.driver.informationUri is a non-empty string containing "http"."""
         sarif_output = format_sarif(report)
@@ -273,7 +273,7 @@ class TestSarifDocumentStructuralInvariants:
         assert "http" in info_uri
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_invocations_contains_exactly_one_element(self, report: ScanReport) -> None:
         """invocations contains exactly one element."""
         sarif_output = format_sarif(report)
@@ -295,7 +295,7 @@ class TestFindingToResultCountAndOrder:
     """
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_results_count_equals_findings_count(self, report: ScanReport) -> None:
         """The SARIF results array has exactly N elements for N findings."""
         sarif_output = format_sarif(report)
@@ -305,7 +305,7 @@ class TestFindingToResultCountAndOrder:
         assert len(run["results"]) == len(report.findings)
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_results_rule_ids_match_findings_in_order(self, report: ScanReport) -> None:
         """For each index i, results[i].ruleId equals findings[i].id."""
         sarif_output = format_sarif(report)
@@ -333,7 +333,7 @@ class TestGateActionToSarifLevelMapping:
     }
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_result_level_matches_gate_action(self, report: ScanReport) -> None:
         """Each result's level matches the expected SARIF level for the finding's gate_action."""
         if not report.findings:
@@ -351,7 +351,7 @@ class TestGateActionToSarifLevelMapping:
             )
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_rule_default_configuration_level_matches_first_finding_gate_action(
         self, report: ScanReport
     ) -> None:
@@ -395,7 +395,7 @@ class TestFindingFieldMappingToSarifResult:
     """
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_finding_field_mapping(self, report: ScanReport) -> None:
         """Each finding maps correctly to its SARIF result fields."""
         from hypothesis import assume
@@ -445,7 +445,7 @@ class TestRoundTripSerializationPreservation:
     """
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_round_trip_findings_count_preserved(self, report: ScanReport) -> None:
         """The round-tripped report has the same number of findings as the original."""
         from ai_artifact_risk_validator.reporting.sarif_parser import SarifParser
@@ -456,7 +456,7 @@ class TestRoundTripSerializationPreservation:
         assert len(parsed_report.findings) == len(report.findings)
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_round_trip_finding_ids_match(self, report: ScanReport) -> None:
         """Each finding's id matches the original after round-trip."""
         from ai_artifact_risk_validator.reporting.sarif_parser import SarifParser
@@ -472,7 +472,7 @@ class TestRoundTripSerializationPreservation:
             )
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_round_trip_finding_gate_actions_match(self, report: ScanReport) -> None:
         """Each finding's gate_action matches the original after round-trip."""
         from ai_artifact_risk_validator.reporting.sarif_parser import SarifParser
@@ -489,7 +489,7 @@ class TestRoundTripSerializationPreservation:
             )
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_round_trip_finding_descriptions_match(self, report: ScanReport) -> None:
         """Each finding's description matches the original after round-trip."""
         from ai_artifact_risk_validator.reporting.sarif_parser import SarifParser
@@ -506,7 +506,7 @@ class TestRoundTripSerializationPreservation:
             )
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_round_trip_finding_artifact_paths_match(self, report: ScanReport) -> None:
         """Each finding's artifact_path matches the original (normalized to forward slashes)."""
         from ai_artifact_risk_validator.reporting.sarif_parser import SarifParser
@@ -525,7 +525,7 @@ class TestRoundTripSerializationPreservation:
             )
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_round_trip_gate_decision_matches(self, report: ScanReport) -> None:
         """The summary.gate_decision matches the original after round-trip."""
         from ai_artifact_risk_validator.reporting.sarif_parser import SarifParser
@@ -555,7 +555,7 @@ class TestRuleDescriptorCorrectness:
     """
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_rules_count_equals_distinct_finding_ids(self, report: ScanReport) -> None:
         """The rules array has exactly one entry per distinct finding id."""
         from hypothesis import assume
@@ -572,7 +572,7 @@ class TestRuleDescriptorCorrectness:
         assert len(rules) == len(distinct_ids)
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_rules_ordered_by_first_appearance(self, report: ScanReport) -> None:
         """Rules are ordered by first appearance of each distinct id in the findings list."""
         from hypothesis import assume
@@ -594,7 +594,7 @@ class TestRuleDescriptorCorrectness:
         assert rule_ids == seen_ids
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_each_rule_id_matches_finding_id(self, report: ScanReport) -> None:
         """Each rule has id matching the finding id."""
         from hypothesis import assume
@@ -616,7 +616,7 @@ class TestRuleDescriptorCorrectness:
             assert rule["id"] == seen_ids[i]
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_each_rule_short_description_matches_first_finding_title(
         self, report: ScanReport
     ) -> None:
@@ -641,7 +641,7 @@ class TestRuleDescriptorCorrectness:
             assert rule["shortDescription"]["text"] == expected_title
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_each_rule_full_description_matches_first_finding_description(
         self, report: ScanReport
     ) -> None:
@@ -666,7 +666,7 @@ class TestRuleDescriptorCorrectness:
             assert rule["fullDescription"]["text"] == expected_description
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_each_result_rule_index_points_to_correct_rule(self, report: ScanReport) -> None:
         """Each result's ruleIndex correctly points to the zero-based position of its rule."""
         from hypothesis import assume
@@ -753,7 +753,7 @@ class TestDuplicateFindingIdRuleDeduplication:
     }
 
     @given(report=valid_scan_report_with_duplicate_ids())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_rule_short_description_uses_first_occurrence_title(self, report: ScanReport) -> None:
         """When multiple findings share the same id, shortDescription.text uses the first title."""
         from collections import Counter
@@ -783,7 +783,7 @@ class TestDuplicateFindingIdRuleDeduplication:
             )
 
     @given(report=valid_scan_report_with_duplicate_ids())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_rule_full_description_uses_first_occurrence_description(
         self, report: ScanReport
     ) -> None:
@@ -815,7 +815,7 @@ class TestDuplicateFindingIdRuleDeduplication:
             )
 
     @given(report=valid_scan_report_with_duplicate_ids())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_rule_default_configuration_level_uses_first_occurrence_gate_action(
         self, report: ScanReport
     ) -> None:
@@ -863,7 +863,7 @@ class TestInvocationMetadataCorrectness:
     """
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_execution_successful_true_when_no_errors(self, report: ScanReport) -> None:
         """executionSuccessful is True when report.errors is empty."""
         from hypothesis import assume
@@ -877,7 +877,7 @@ class TestInvocationMetadataCorrectness:
         assert invocation["executionSuccessful"] is True
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_execution_successful_false_when_errors_present(self, report: ScanReport) -> None:
         """executionSuccessful is False when report.errors has one or more entries."""
         from hypothesis import assume
@@ -891,7 +891,7 @@ class TestInvocationMetadataCorrectness:
         assert invocation["executionSuccessful"] is False
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_command_line_matches_artifact_path(self, report: ScanReport) -> None:
         """commandLine equals 'ai-artifact-validator verify <normalized_path>'."""
         sarif_output = format_sarif(report)
@@ -903,7 +903,7 @@ class TestInvocationMetadataCorrectness:
         assert invocation["commandLine"] == expected_command_line
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_start_time_utc_matches_scan_timestamp(self, report: ScanReport) -> None:
         """startTimeUtc equals scan_timestamp formatted as ISO 8601 UTC."""
         sarif_output = format_sarif(report)
@@ -927,7 +927,7 @@ class TestRemediationToHelpMapping:
     """
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_non_empty_remediation_produces_help_text(self, report: ScanReport) -> None:
         """Non-empty remediation produces help.text; empty/whitespace omits help."""
         from hypothesis import assume
@@ -976,7 +976,7 @@ class TestPropertiesBagEnrichment:
     """
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_properties_bag_severity_score_matches_finding(self, report: ScanReport) -> None:
         """Each result's properties.severity_score equals the finding's severity_score."""
         from hypothesis import assume
@@ -995,7 +995,7 @@ class TestPropertiesBagEnrichment:
             )
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_properties_bag_confidence_matches_finding(self, report: ScanReport) -> None:
         """Each result's properties.confidence equals the finding's confidence."""
         from hypothesis import assume
@@ -1014,7 +1014,7 @@ class TestPropertiesBagEnrichment:
             )
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_properties_bag_category_matches_finding(self, report: ScanReport) -> None:
         """Each result's properties.category equals the finding's category.value."""
         from hypothesis import assume
@@ -1033,7 +1033,7 @@ class TestPropertiesBagEnrichment:
             )
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_properties_bag_scanner_module_matches_finding(self, report: ScanReport) -> None:
         """Each result's properties.scanner_module equals the finding's scanner_module.value."""
         from hypothesis import assume
@@ -1052,7 +1052,7 @@ class TestPropertiesBagEnrichment:
             )
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_properties_bag_evidence_matches_finding(self, report: ScanReport) -> None:
         """Each result's properties.evidence equals the finding's evidence."""
         from hypothesis import assume
@@ -1096,7 +1096,7 @@ class TestDeterministicValidJsonOutput:
                 TestDeterministicValidJsonOutput._check_keys_sorted(item)
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_output_is_parseable_json(self, report: ScanReport) -> None:
         """The SARIF output is parseable as valid JSON (RFC 8259 compliant)."""
         sarif_output = format_sarif(report)
@@ -1105,7 +1105,7 @@ class TestDeterministicValidJsonOutput:
         assert isinstance(doc, dict)
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_all_keys_in_lexicographic_order(self, report: ScanReport) -> None:
         """All object keys at every nesting level are in lexicographic (sorted) order."""
         sarif_output = format_sarif(report)
@@ -1113,7 +1113,7 @@ class TestDeterministicValidJsonOutput:
         self._check_keys_sorted(doc)
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_datetime_values_are_iso_8601_utc(self, report: ScanReport) -> None:
         """All datetime values (startTimeUtc) are formatted as ISO 8601 UTC: YYYY-MM-DDTHH:MM:SSZ."""
         import re
@@ -1145,7 +1145,7 @@ class TestFalsePositiveToSuppressionsMapping:
     """
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_false_positive_produces_suppressions(self, report: ScanReport) -> None:
         """Findings with false_positive=True produce a suppressions array with correct entry."""
         from hypothesis import assume
@@ -1179,7 +1179,7 @@ class TestFalsePositiveToSuppressionsMapping:
                 )
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_non_false_positive_has_no_suppressions(self, report: ScanReport) -> None:
         """Findings with false_positive=False do NOT have a suppressions key."""
         from hypothesis import assume

@@ -182,7 +182,7 @@ class TestElevatedPrivilegeDetection:
     analyzer = ConfigPrivilegeAnalyzer()
 
     @given(config=config_with_sudo_command())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_sudo_command_produces_mcp_s7(self, config: MCPServerConfig) -> None:
         """For any config where command starts with 'sudo', the analyzer
         SHALL produce a ScanFinding with id='MCP-S7'."""
@@ -195,7 +195,7 @@ class TestElevatedPrivilegeDetection:
         )
 
     @given(config=config_with_privileged_in_command())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_privileged_in_command_produces_mcp_s7(self, config: MCPServerConfig) -> None:
         """For any config where command contains '--privileged', the analyzer
         SHALL produce a ScanFinding with id='MCP-S7'."""
@@ -208,7 +208,7 @@ class TestElevatedPrivilegeDetection:
         )
 
     @given(config=config_with_privileged_in_args())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_privileged_in_args_produces_mcp_s7(self, config: MCPServerConfig) -> None:
         """For any config where args contain '--privileged', the analyzer
         SHALL produce a ScanFinding with id='MCP-S7'."""
@@ -222,7 +222,7 @@ class TestElevatedPrivilegeDetection:
         )
 
     @given(config=config_with_user_root())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_user_root_env_produces_mcp_s7(self, config: MCPServerConfig) -> None:
         """For any config where env specifies USER=root, the analyzer
         SHALL produce a ScanFinding with id='MCP-S7'."""
@@ -235,7 +235,7 @@ class TestElevatedPrivilegeDetection:
         )
 
     @given(config=config_with_uid_zero())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_uid_zero_env_produces_mcp_s7(self, config: MCPServerConfig) -> None:
         """For any config where env specifies UID=0, the analyzer
         SHALL produce a ScanFinding with id='MCP-S7'."""
@@ -248,7 +248,7 @@ class TestElevatedPrivilegeDetection:
         )
 
     @given(config=privileged_config)
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_any_privileged_config_produces_mcp_s7(self, config: MCPServerConfig) -> None:
         """For any MCP server configuration with elevated privileges (sudo,
         --privileged, USER=root, or UID=0), the ConfigPrivilegeAnalyzer

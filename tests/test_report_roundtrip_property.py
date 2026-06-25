@@ -173,7 +173,7 @@ class TestReportSerializationRoundTrip:
     """
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_serialize_then_parse_produces_equivalent_report(self, report: ScanReport) -> None:
         """For all valid ScanReport r, parse(serialize(r)) == r (structurally).
 

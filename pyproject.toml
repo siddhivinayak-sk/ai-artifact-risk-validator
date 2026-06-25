@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ai-artifact-risk-validator"
-version = "0.9.0"
+version = "0.10.0"
 description = "Validates AI artifacts for security, performance, quality, compliance, and operational risks"
 readme = "README.md"
 license = "MIT"

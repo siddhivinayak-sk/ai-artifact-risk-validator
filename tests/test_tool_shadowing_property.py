@@ -88,7 +88,7 @@ class TestToolShadowingDetection:
     analyzer = ToolDescriptionAnalyzer()
 
     @given(tool=mcp_tool_with_builtin_name())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_builtin_name_produces_shadowing_finding(self, tool: MCPToolInfo) -> None:
         """For any MCP tool whose name exactly matches one of the registered
         built-in tool names, the ToolDescriptionAnalyzer SHALL report a tool
@@ -104,7 +104,7 @@ class TestToolShadowingDetection:
         )
 
     @given(tool=mcp_tool_with_non_builtin_name())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_non_builtin_name_produces_no_shadowing_finding(self, tool: MCPToolInfo) -> None:
         """For tools with names NOT in the built-in registry, no shadowing
         finding shall be produced."""

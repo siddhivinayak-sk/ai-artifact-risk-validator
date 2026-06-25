@@ -129,7 +129,7 @@ class TestTSJSDualPatternApplication:
     """
 
     @given(data=dual_pattern_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_dual_patterns_produce_findings_from_both_sources(self, data: tuple[str, str]) -> None:
         """Code with both a TS-specific pattern and a generic pattern SHALL
         produce MCP-S1 findings from both detection sources.

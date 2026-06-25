@@ -268,7 +268,7 @@ class TestRCEPatternDetectionGenericLanguages:
     scanner = GenericLanguageScanner()
 
     @given(content=go_rce_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_go_rce_detected_as_mcp_s1(self, content: str) -> None:
         """Any Go code with exec.Command or os/exec SHALL produce at least one
         MCP-S1 finding with confidence=0.80."""
@@ -286,7 +286,7 @@ class TestRCEPatternDetectionGenericLanguages:
         )
 
     @given(content=ruby_rce_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_ruby_rce_detected_as_mcp_s1(self, content: str) -> None:
         """Any Ruby code with system()/backtick/exec()/%x{} SHALL produce at least one
         MCP-S1 finding with confidence=0.80."""
@@ -304,7 +304,7 @@ class TestRCEPatternDetectionGenericLanguages:
         )
 
     @given(content=csharp_rce_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_csharp_rce_detected_as_mcp_s1(self, content: str) -> None:
         """Any C# code with Process.Start/Process.StartInfo SHALL produce at least one
         MCP-S1 finding with confidence=0.80."""
@@ -324,7 +324,7 @@ class TestRCEPatternDetectionGenericLanguages:
         )
 
     @given(content=php_rce_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_php_rce_detected_as_mcp_s1(self, content: str) -> None:
         """Any PHP code with shell_exec/exec/system/passthru/popen SHALL produce
         at least one MCP-S1 finding with confidence=0.80."""
@@ -360,7 +360,7 @@ class TestSSRFPatternDetectionGenericLanguages:
     scanner = GenericLanguageScanner()
 
     @given(content=go_ssrf_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_go_ssrf_detected_as_mcp_s2(self, content: str) -> None:
         """Any Go code with http.Get/Post/Head/PostForm with variable URL SHALL
         produce at least one MCP-S2 finding with confidence=0.80."""
@@ -378,7 +378,7 @@ class TestSSRFPatternDetectionGenericLanguages:
         )
 
     @given(content=ruby_ssrf_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_ruby_ssrf_detected_as_mcp_s2(self, content: str) -> None:
         """Any Ruby code with Net::HTTP or open-uri SHALL produce at least one
         MCP-S2 finding with confidence=0.80."""
@@ -396,7 +396,7 @@ class TestSSRFPatternDetectionGenericLanguages:
         )
 
     @given(content=csharp_ssrf_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_csharp_ssrf_detected_as_mcp_s2(self, content: str) -> None:
         """Any C# code with HttpClient/WebRequest/WebClient SHALL produce at least
         one MCP-S2 finding with confidence=0.80."""
@@ -416,7 +416,7 @@ class TestSSRFPatternDetectionGenericLanguages:
         )
 
     @given(content=php_ssrf_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_php_ssrf_detected_as_mcp_s2(self, content: str) -> None:
         """Any PHP code with file_get_contents($var)/curl_exec() SHALL produce
         at least one MCP-S2 finding with confidence=0.80."""

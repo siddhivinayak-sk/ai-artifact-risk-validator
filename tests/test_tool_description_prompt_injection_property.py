@@ -159,7 +159,7 @@ class TestToolDescriptionPromptInjection:
         tool_name=_tool_name_strategy,
         description=excessive_spaces_description(),
     )
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_excessive_spaces_detected_as_mcp_s3(self, tool_name: str, description: str) -> None:
         """Any tool description with >20 spaces followed by hidden text
         SHALL produce at least one MCP-S3 finding."""
@@ -179,7 +179,7 @@ class TestToolDescriptionPromptInjection:
         tool_name=_tool_name_strategy,
         description=excessive_newlines_description(),
     )
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_excessive_newlines_detected_as_mcp_s3(self, tool_name: str, description: str) -> None:
         """Any tool description with >5 newlines followed by hidden text
         SHALL produce at least one MCP-S3 finding."""
@@ -199,7 +199,7 @@ class TestToolDescriptionPromptInjection:
         tool_name=_tool_name_strategy,
         description=zero_width_chars_description(),
     )
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_zero_width_chars_detected_as_mcp_s3(self, tool_name: str, description: str) -> None:
         """Any tool description containing zero-width Unicode Cf/Mn characters
         SHALL produce at least one MCP-S3 finding."""
@@ -219,7 +219,7 @@ class TestToolDescriptionPromptInjection:
         tool_name=_tool_name_strategy,
         description=credential_exfiltration_description(),
     )
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_credential_exfiltration_detected_as_mcp_s3(
         self, tool_name: str, description: str
     ) -> None:

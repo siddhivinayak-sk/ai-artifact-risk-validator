@@ -368,7 +368,7 @@ class MCPClient:
                         "capabilities": {},
                         "clientInfo": {
                             "name": "ai-artifact-risk-validator",
-                            "version": "0.9.0",
+                            "version": "0.10.0",
                         },
                     },
                 ),
@@ -527,7 +527,7 @@ class MCPClient:
                 "capabilities": {},
                 "clientInfo": {
                     "name": "ai-artifact-risk-validator",
-                    "version": "0.9.0",
+                    "version": "0.10.0",
                 },
             },
         }

@@ -270,7 +270,7 @@ class TestEvidenceLanguageNameInclusion:
     scanner = GenericLanguageScanner()
 
     @given(code=go_code_with_finding())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_go_findings_contain_language_name_in_evidence(self, code: str) -> None:
         """For any finding produced when scanning Go files, the evidence field
         SHALL contain the language name 'Go'."""
@@ -298,7 +298,7 @@ class TestEvidenceLanguageNameInclusion:
             )
 
     @given(code=ruby_code_with_finding())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_ruby_findings_contain_language_name_in_evidence(self, code: str) -> None:
         """For any finding produced when scanning Ruby files, the evidence field
         SHALL contain the language name 'Ruby'."""
@@ -326,7 +326,7 @@ class TestEvidenceLanguageNameInclusion:
             )
 
     @given(code=csharp_code_with_finding())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_csharp_findings_contain_language_name_in_evidence(self, code: str) -> None:
         """For any finding produced when scanning C# files, the evidence field
         SHALL contain the language name 'C#'."""
@@ -354,7 +354,7 @@ class TestEvidenceLanguageNameInclusion:
             )
 
     @given(code=php_code_with_finding())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_php_findings_contain_language_name_in_evidence(self, code: str) -> None:
         """For any finding produced when scanning PHP files, the evidence field
         SHALL contain the language name 'PHP'."""

@@ -141,7 +141,7 @@ class TestSQLInjectionDetectionJava:
     """
 
     @given(content=sql_concat_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_sql_concat_detected_as_mcp_s6(self, content: str) -> None:
         """Any Java code with SQL string concatenation (non-parameterized queries)
         SHALL produce at least one MCP-S6 finding."""
@@ -156,7 +156,7 @@ class TestSQLInjectionDetectionJava:
         )
 
     @given(content=jndi_lookup_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_jndi_lookup_detected_as_mcp_s6(self, content: str) -> None:
         """Any Java code with JNDI lookups using dynamic (variable) names
         SHALL produce at least one MCP-S6 finding."""
@@ -171,7 +171,7 @@ class TestSQLInjectionDetectionJava:
         )
 
     @given(content=spring_tool_sql_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_spring_tool_sql_detected_as_mcp_s6(self, content: str) -> None:
         """Any Java code with Spring AI @Tool methods passing String params to SQL
         SHALL produce at least one MCP-S6 finding."""

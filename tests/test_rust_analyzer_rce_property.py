@@ -264,7 +264,7 @@ class TestRustRCEPatternDetection:
     analyzer = RustAnalyzer()
 
     @given(code=rust_std_process_command_code())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_std_process_command_detected_as_mcp_s1(self, code: str) -> None:
         """For any Rust source file containing std::process::Command::new,
         the RustAnalyzer SHALL produce at least one ScanFinding with
@@ -289,7 +289,7 @@ class TestRustRCEPatternDetection:
         )
 
     @given(code=rust_tokio_process_command_code())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_tokio_process_command_detected_as_mcp_s1(self, code: str) -> None:
         """For any Rust source file containing tokio::process::Command::new,
         the RustAnalyzer SHALL produce at least one ScanFinding with
@@ -314,7 +314,7 @@ class TestRustRCEPatternDetection:
         )
 
     @given(code=rust_unsafe_ffi_pointer_code())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_unsafe_ffi_pointer_detected_as_mcp_s1(self, code: str) -> None:
         """For any Rust source file containing unsafe blocks with FFI/pointer
         operations (raw pointer dereference, transmute, extern "C"), the

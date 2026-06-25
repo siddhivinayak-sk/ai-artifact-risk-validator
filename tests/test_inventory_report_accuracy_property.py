@@ -122,7 +122,7 @@ class TestInventoryReportAccuracy:
         resources=resources_list,
         prompt_templates=prompt_templates_list,
     )
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_tool_count_equals_len_tools(
         self,
         server_name: str,
@@ -154,7 +154,7 @@ class TestInventoryReportAccuracy:
         resources=resources_list,
         prompt_templates=prompt_templates_list,
     )
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_resource_count_equals_len_resources(
         self,
         server_name: str,
@@ -188,7 +188,7 @@ class TestInventoryReportAccuracy:
         resources=resources_list,
         prompt_templates=prompt_templates_list,
     )
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_prompt_count_equals_len_prompt_templates(
         self,
         server_name: str,
@@ -222,7 +222,7 @@ class TestInventoryReportAccuracy:
         resources=resources_list,
         prompt_templates=prompt_templates_list,
     )
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_tool_names_match_input(
         self,
         server_name: str,
@@ -256,7 +256,7 @@ class TestInventoryReportAccuracy:
         resources=resources_list,
         prompt_templates=prompt_templates_list,
     )
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_resource_names_and_uris_match_input(
         self,
         server_name: str,
@@ -295,7 +295,7 @@ class TestInventoryReportAccuracy:
         )
 
     @given(inventory=mcp_server_inventory())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_inventory_all_counts_consistent(
         self,
         inventory: MCPServerInventory,

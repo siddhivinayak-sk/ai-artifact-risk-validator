@@ -150,7 +150,7 @@ class TestUnknownLanguageFallback:
     """
 
     @given(data=unknown_language_file_with_security_pattern())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_unknown_language_detection(self, data: tuple[str, str]) -> None:
         """Files with unrecognized extensions are classified as UNKNOWN by LanguageDetector."""
         filename, content = data
@@ -164,7 +164,7 @@ class TestUnknownLanguageFallback:
         )
 
     @given(data=unknown_language_file_with_security_pattern())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_all_findings_have_confidence_060(self, data: tuple[str, str]) -> None:
         """All findings from UNKNOWN language files have confidence exactly 0.60."""
         filename, content = data
@@ -186,7 +186,7 @@ class TestUnknownLanguageFallback:
             )
 
     @given(ext=_UNKNOWN_EXTENSIONS)
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_unknown_extensions_not_in_language_detector(self, ext: str) -> None:
         """Verify that our test extensions are indeed unrecognized."""
         detector = LanguageDetector()

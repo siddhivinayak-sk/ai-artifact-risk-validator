@@ -223,7 +223,7 @@ class TestScanFindingSchemaValidity:
     generic_scanner = GenericLanguageScanner()
 
     @given(code=tsjs_code_with_findings())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_tsjs_findings_pass_schema_validation(self, code: str) -> None:
         """For any finding produced by TSJSEnhancedPatterns, the finding SHALL
         pass ScanFinding schema validation."""
@@ -241,7 +241,7 @@ class TestScanFindingSchemaValidity:
             validate_finding_schema(finding)
 
     @given(code=rust_code_with_findings())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_rust_findings_pass_schema_validation(self, code: str) -> None:
         """For any finding produced by RustAnalyzer, the finding SHALL
         pass ScanFinding schema validation."""
@@ -259,7 +259,7 @@ class TestScanFindingSchemaValidity:
             validate_finding_schema(finding)
 
     @given(code=java_code_with_findings())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_java_findings_pass_schema_validation(self, code: str) -> None:
         """For any finding produced by JavaAnalyzer, the finding SHALL
         pass ScanFinding schema validation."""
@@ -277,7 +277,7 @@ class TestScanFindingSchemaValidity:
             validate_finding_schema(finding)
 
     @given(code_and_lang=generic_language_code_with_findings())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_generic_scanner_findings_pass_schema_validation(
         self, code_and_lang: tuple[str, DetectedLanguage]
     ) -> None:

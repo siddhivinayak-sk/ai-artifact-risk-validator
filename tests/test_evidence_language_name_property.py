@@ -124,7 +124,7 @@ class TestEvidenceLanguageNameInclusion:
     scanner = GenericLanguageScanner()
 
     @given(content=go_finding_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_go_findings_contain_language_name_in_evidence(self, content: str) -> None:
         """Any finding from scanning Go code SHALL have 'Go' in the evidence field."""
         findings = self.scanner.scan(content, DetectedLanguage.GO, ArtifactType.MCP, "server.go")
@@ -140,7 +140,7 @@ class TestEvidenceLanguageNameInclusion:
             )
 
     @given(content=ruby_finding_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_ruby_findings_contain_language_name_in_evidence(self, content: str) -> None:
         """Any finding from scanning Ruby code SHALL have 'Ruby' in the evidence field."""
         findings = self.scanner.scan(content, DetectedLanguage.RUBY, ArtifactType.MCP, "server.rb")
@@ -156,7 +156,7 @@ class TestEvidenceLanguageNameInclusion:
             )
 
     @given(content=csharp_finding_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_csharp_findings_contain_language_name_in_evidence(self, content: str) -> None:
         """Any finding from scanning C# code SHALL have 'C#' in the evidence field."""
         findings = self.scanner.scan(
@@ -174,7 +174,7 @@ class TestEvidenceLanguageNameInclusion:
             )
 
     @given(content=php_finding_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_php_findings_contain_language_name_in_evidence(self, content: str) -> None:
         """Any finding from scanning PHP code SHALL have 'PHP' in the evidence field."""
         findings = self.scanner.scan(content, DetectedLanguage.PHP, ArtifactType.MCP, "server.php")

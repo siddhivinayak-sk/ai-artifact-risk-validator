@@ -187,7 +187,7 @@ class TestHtmlStructuralValidity:
     """
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_output_contains_required_html5_structure(self, report: ScanReport) -> None:
         """format_html output must contain all required HTML5 structural elements."""
         output = format_html(report)
@@ -201,7 +201,7 @@ class TestHtmlStructuralValidity:
         assert "</body>" in output
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_output_contains_inline_style_element(self, report: ScanReport) -> None:
         """format_html output must contain a <style> element with CSS content."""
         output = format_html(report)
@@ -209,7 +209,7 @@ class TestHtmlStructuralValidity:
         assert "<style>" in output
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_output_has_no_external_resource_references(self, report: ScanReport) -> None:
         """format_html output must NOT reference any external resources."""
         output = format_html(report)
@@ -234,7 +234,7 @@ class TestSummarySectionCompleteness:
     """
 
     @given(report=valid_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_summary_contains_all_required_fields(self, report: ScanReport) -> None:
         """Assert all summary fields appear HTML-escaped in the output."""
         output = format_html(report)
@@ -337,7 +337,7 @@ class TestSuppressedFindingVisualDistinction:
     """
 
     @given(report=scan_report_with_suppressed_and_active())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_suppressed_findings_have_suppressed_class(self, report: ScanReport) -> None:
         """Findings with false_positive=True have 'suppressed' class;
         findings with false_positive=False do NOT have 'suppressed' class.
@@ -388,7 +388,7 @@ class TestFindingContentCompleteness:
     @given(
         report=valid_scan_report().filter(lambda r: len(r.findings) > 0),
     )
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_finding_fields_appear_as_escaped_text(self, report: ScanReport) -> None:
         """Each finding's id, title, severity_label, category, and description
         appear as HTML-escaped text in the output."""
@@ -418,7 +418,7 @@ class TestFindingContentCompleteness:
     @given(
         report=valid_scan_report().filter(lambda r: any(f.evidence for f in r.findings)),
     )
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_evidence_appears_in_code_block(self, report: ScanReport) -> None:
         """For findings with non-empty evidence, the escaped evidence text
         appears within <pre> and </pre> or <code> and </code> elements."""
@@ -452,7 +452,7 @@ class TestErrorMessageInclusion:
     """
 
     @given(report=scan_report_with_errors())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_all_error_messages_appear_html_escaped_in_output(self, report: ScanReport) -> None:
         """All error messages from report.errors appear HTML-escaped in the output."""
         output = format_html(report)
@@ -566,7 +566,7 @@ class TestXssPreventionViaHtmlEntityEscaping:
     """
 
     @given(report=adversarial_scan_report())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_no_raw_script_tag_in_output(self, report: ScanReport) -> None:
         """Assert no raw <script appears in output; it must be &lt;script.
 

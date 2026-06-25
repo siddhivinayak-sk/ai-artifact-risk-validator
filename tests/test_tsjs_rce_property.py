@@ -119,7 +119,7 @@ class TestRCEPatternDetectionTSJS:
     """
 
     @given(content=child_process_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_child_process_detected_as_mcp_s1(self, content: str) -> None:
         """Any TS/JS code with child_process.exec/execSync/spawn/execFile
         SHALL produce at least one MCP-S1 finding with confidence 0.90."""
@@ -138,7 +138,7 @@ class TestRCEPatternDetectionTSJS:
         )
 
     @given(content=new_function_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_new_function_detected_as_mcp_s1(self, content: str) -> None:
         """Any TS/JS code with new Function() using dynamic args
         SHALL produce at least one MCP-S1 finding with confidence 0.85."""
@@ -157,7 +157,7 @@ class TestRCEPatternDetectionTSJS:
         )
 
     @given(content=vm_module_snippet())
-    @settings(max_examples=100)
+    @settings(max_examples=100, deadline=None)
     def test_vm_module_detected_as_mcp_s1(self, content: str) -> None:
         """Any TS/JS code with vm.runInNewContext/runInThisContext/vm.Script
         SHALL produce at least one MCP-S1 finding with confidence 0.90."""

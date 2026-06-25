@@ -76,3 +76,21 @@ class ValidatorConfig(BaseModel):
     allow_llm_analysis: bool = False
     llm_provider: str = "openai"  # openai | anthropic | nvidia
     llm_model: str | None = None  # None = provider default
+    # --- Script scanning options ---
+    script_scanning_enabled: bool = True
+    script_extensions: list[str] = Field(
+        default_factory=lambda: [
+            ".py",
+            ".ts",
+            ".js",
+            ".ps1",
+            ".sh",
+            ".bash",
+            ".bat",
+            ".cmd",
+            ".rb",
+            ".java",
+            ".kt",
+            ".rs",
+        ]
+    )
