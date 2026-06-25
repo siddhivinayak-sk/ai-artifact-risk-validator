@@ -439,10 +439,16 @@ _DESTRUCTIVE_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
         re.compile(r"(?i)(?:format\s+[A-Za-z]:|format\s+/dev/|mkfs(?:\.\w+)?\s|\bfdisk\s)"),
         0.90,
     ),
-    # Truncate/overwrite
+    # Truncate/overwrite — require file/path context to avoid prose matches
+    # "truncate" alone in prose (e.g., "truncate the output") should not trigger.
     (
         "File truncation",
-        re.compile(r"(?i)\b(?:truncate|>\s*/dev/null|\b:\s*>)"),
+        re.compile(
+            r"(?i)(?:\btruncate\s+(?:-s\s*\d+\s+)?(?:/|~|\.|\w+[/\\])[\w./\\-]+"
+            r"|\btruncate\s*\(\s*['\"]"
+            r"|>\s*/dev/null"
+            r"|:\s*>)"
+        ),
         0.88,
     ),
     # Database destructive operations
@@ -451,10 +457,15 @@ _DESTRUCTIVE_PATTERNS: list[tuple[str, re.Pattern[str], float]] = [
         re.compile(r"(?i)\b(?:DROP\s+(?:TABLE|DATABASE|SCHEMA)|TRUNCATE\s+TABLE|DELETE\s+FROM)\b"),
         0.92,
     ),
-    # System commands
+    # System commands — require command-line context to avoid matching prose
+    # The word "halt" alone in prose (e.g., "halt the pipeline") should not trigger.
+    # Only match when followed by command flags or preceded by shell indicators.
     (
         "Dangerous system command",
-        re.compile(r"(?i)\b(?:shutdown|reboot|halt|poweroff|init\s+0)\b"),
+        re.compile(
+            r"(?i)(?:^\s*(?:\$|>|#)\s+.*?)?\b(?:shutdown|reboot|poweroff|init\s+0)\b"
+            r"|\bhalt\s+-[a-z]"
+        ),
         0.95,
     ),
     # Kill/terminate

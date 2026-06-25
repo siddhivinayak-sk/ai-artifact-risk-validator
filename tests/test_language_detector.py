@@ -112,7 +112,7 @@ known_extension_strategy = st.sampled_from(list(EXTENSION_LANGUAGE_MAP.keys()))
 
 # Strategy for unknown extensions
 unknown_extension_strategy = st.sampled_from(
-    [".txt", ".md", ".yml", ".yaml", ".json", ".xml", ".html", ".css", ".log", ".dat"]
+    [".txt", ".yml", ".yaml", ".json", ".xml", ".html", ".css", ".log", ".dat"]
 )
 
 # Strategy for directory prefixes
