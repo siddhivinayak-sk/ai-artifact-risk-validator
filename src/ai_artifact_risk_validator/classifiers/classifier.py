@@ -73,7 +73,11 @@ class ArtifactClassifier:
     The highest-scoring artifact type above the 0.3 threshold is returned.
     """
 
-    def __init__(self, custom_patterns: dict[str, list[str]] | None = None) -> None:
+    def __init__(
+        self,
+        custom_patterns: dict[str, list[str]] | None = None,
+        semantic_enabled: bool = True,
+    ) -> None:
         """Initialize the classifier with optional custom patterns.
 
         Args:
@@ -81,6 +85,10 @@ class ArtifactClassifier:
                 regex patterns that augment the built-in path patterns for
                 classification. Keys should match ArtifactType values
                 (e.g. "prompt", "skill", "mcp").
+            semantic_enabled: Whether semantic classification is allowed.
+                When ``False``, the semantic signal is skipped regardless of
+                library availability. Defaults to ``True`` for backward
+                compatibility.
         """
         self._custom_patterns: dict[ArtifactType, list[str]] = {}
         if custom_patterns:
@@ -91,6 +99,8 @@ class ArtifactClassifier:
                 except ValueError:
                     # Skip unknown artifact type names gracefully
                     pass
+
+        self._semantic_enabled: bool = semantic_enabled
 
         # Semantic support (lazy-loaded)
         self._semantic_available: bool | None = None
@@ -298,6 +308,8 @@ class ArtifactClassifier:
 
     def _is_semantic_available(self) -> bool:
         """Check if semantic scoring is available (lazy, cached)."""
+        if not self._semantic_enabled:
+            return False
         if self._semantic_available is None:
             try:
                 from ai_artifact_risk_validator.semantic.embeddings import get_shared_engine
