@@ -258,6 +258,8 @@ class FileDiscovery:
 
         Matches against both the filename alone and the full path string
         to support patterns like '*.py' and 'tests/**/*.py'.
+        Normalizes path separators to forward slashes for cross-platform
+        compatibility (patterns use forward slashes on all platforms).
 
         Args:
             filename: The file's name (basename).
@@ -267,9 +269,23 @@ class FileDiscovery:
         Returns:
             True if the file matches at least one pattern.
         """
+        # Normalize path separators to forward slashes for cross-platform matching
+        normalized_path = full_path.replace("\\", "/")
+
         for pattern in patterns:
-            if fnmatch.fnmatch(filename, pattern):
+            normalized_pattern = pattern.replace("\\", "/")
+            # Match against basename
+            if fnmatch.fnmatch(filename, normalized_pattern):
                 return True
-            if fnmatch.fnmatch(full_path, pattern):
+            # Match against the full normalized path
+            if fnmatch.fnmatch(normalized_path, normalized_pattern):
                 return True
+            # Match against path segments (for relative patterns like "tests/**")
+            # This handles cases where full_path is absolute but pattern is relative
+            if "/" in normalized_pattern:
+                parts = normalized_path.split("/")
+                for i in range(len(parts)):
+                    relative_segment = "/".join(parts[i:])
+                    if fnmatch.fnmatch(relative_segment, normalized_pattern):
+                        return True
         return False

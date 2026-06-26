@@ -31,6 +31,7 @@ class ReportGenerator:
         artifact_type: ArtifactType | None = None,
         errors: list[str] | None = None,
         has_executable_scripts: bool = False,
+        gate_overrides: dict[str, GateAction] | None = None,
     ) -> ScanReport:
         """Generate a complete ScanReport from findings and context.
 
@@ -41,12 +42,17 @@ class ReportGenerator:
             errors: Optional list of error/diagnostic messages.
             has_executable_scripts: Whether the artifact includes executable files
                 (triggers the 1.3x risk multiplier in aggregate score calculation).
+            gate_overrides: Optional dict mapping risk IDs to overridden GateAction values.
 
         Returns:
             A fully assembled ScanReport with computed summary and risk score.
         """
-        summary = self._compute_summary(findings)
-        risk_score = compute_risk_score(findings, has_executable_scripts)
+        # Apply gate_overrides to each finding's gate_action field so the
+        # serialized report reflects the effective gate decision.
+        effective_findings = self._apply_gate_overrides(findings, gate_overrides)
+
+        summary = self._compute_summary(effective_findings, gate_overrides)
+        risk_score = compute_risk_score(effective_findings, has_executable_scripts)
         risk_sev, risk_rec = severity_band(risk_score)
 
         return ScanReport(
@@ -55,7 +61,7 @@ class ReportGenerator:
             artifact_type=artifact_type,
             scan_timestamp=datetime.now(timezone.utc),
             scanner_version=__version__,
-            findings=findings,
+            findings=effective_findings,
             summary=summary,
             errors=errors or [],
             risk_score=risk_score,
@@ -64,7 +70,39 @@ class ReportGenerator:
             has_executable_scripts=has_executable_scripts,
         )
 
-    def _compute_summary(self, findings: list[ScanFinding]) -> ScanSummary:
+    def _apply_gate_overrides(
+        self,
+        findings: list[ScanFinding],
+        gate_overrides: dict[str, GateAction] | None = None,
+    ) -> list[ScanFinding]:
+        """Apply gate_overrides to each finding's gate_action field.
+
+        This ensures the serialized report JSON reflects the effective gate
+        decision for each finding (including overrides), not just the scanner's
+        default severity-based assignment.
+
+        Args:
+            findings: List of scan findings.
+            gate_overrides: Optional dict mapping risk IDs to overridden GateAction values.
+
+        Returns:
+            List of findings with gate_action updated per overrides.
+        """
+        if not gate_overrides:
+            return findings
+
+        result: list[ScanFinding] = []
+        for finding in findings:
+            if finding.id in gate_overrides:
+                effective_gate = assign_gate_action(finding, gate_overrides)
+                result.append(finding.model_copy(update={"gate_action": effective_gate}))
+            else:
+                result.append(finding)
+        return result
+
+    def _compute_summary(
+        self, findings: list[ScanFinding], gate_overrides: dict[str, GateAction] | None = None
+    ) -> ScanSummary:
         """Compute the ScanSummary from a list of findings.
 
         - total_findings: count of ALL findings (including false positives)
@@ -77,6 +115,7 @@ class ReportGenerator:
 
         Args:
             findings: List of scan findings to summarize.
+            gate_overrides: Optional dict mapping risk IDs to overridden GateAction values.
 
         Returns:
             Computed ScanSummary.
@@ -104,7 +143,7 @@ class ReportGenerator:
             if finding.false_positive:
                 continue
 
-            effective_gate = assign_gate_action(finding)
+            effective_gate = assign_gate_action(finding, gate_overrides)
 
             if effective_gate == GateAction.BLOCK:
                 blocking_findings += 1
@@ -114,7 +153,7 @@ class ReportGenerator:
                 info_findings += 1
 
         # Overall gate decision (excludes false positives)
-        gate_decision = compute_overall_gate(findings)
+        gate_decision = compute_overall_gate(findings, gate_overrides)
 
         return ScanSummary(
             total_findings=total_findings,

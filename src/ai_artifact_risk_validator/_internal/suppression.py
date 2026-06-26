@@ -165,5 +165,18 @@ def _matches_suppression_rule(finding: ScanFinding, rule: SuppressionRule) -> bo
     # If no file_pattern, the rule matches all files for that risk_id
     if rule.file_pattern is None:
         return True
-    # Use fnmatch for glob-style pattern matching
-    return fnmatch(finding.artifact_path, rule.file_pattern)
+    # Normalize path separators to forward slashes for consistent matching
+    normalized_path = finding.artifact_path.replace("\\", "/")
+    pattern = rule.file_pattern.replace("\\", "/")
+    # Try matching against the full path
+    if fnmatch(normalized_path, pattern):
+        return True
+    # Also try matching against relative path segments
+    # This handles the case where the pattern is relative (e.g., "tests/**")
+    # but the artifact_path is absolute
+    parts = normalized_path.split("/")
+    for i in range(len(parts)):
+        relative_segment = "/".join(parts[i:])
+        if fnmatch(relative_segment, pattern):
+            return True
+    return False

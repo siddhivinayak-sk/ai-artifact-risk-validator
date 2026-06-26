@@ -121,7 +121,7 @@ def matching_finding_and_rule_strategy(draw: st.DrawFn) -> tuple[ScanFinding, Su
     artifact_path = draw(st.sampled_from(matching_paths))
 
     finding = draw(finding_strategy(risk_id=risk_id, artifact_path=artifact_path))
-    rule = SuppressionRule(risk_id=risk_id, file_pattern=file_pattern)
+    rule = SuppressionRule(risk_id=risk_id, file_pattern=file_pattern, reason="test")
 
     return finding, rule
 
@@ -140,7 +140,7 @@ def non_matching_finding_and_rule_strategy(draw: st.DrawFn) -> tuple[ScanFinding
     artifact_path = draw(st.sampled_from(_NON_MATCHING_PATHS))
 
     finding = draw(finding_strategy(risk_id=finding_risk_id, artifact_path=artifact_path))
-    rule = SuppressionRule(risk_id=rule_risk_id, file_pattern=file_pattern)
+    rule = SuppressionRule(risk_id=rule_risk_id, file_pattern=file_pattern, reason="test")
 
     return finding, rule
 
@@ -204,7 +204,7 @@ class TestSuppressionRuleApplication:
             st.sampled_from(_NON_MATCHING_PATHS + ["prompts/test.md", "src/main.py"])
         )
         finding = data.draw(finding_strategy(risk_id=risk_id, artifact_path=artifact_path))
-        rule = SuppressionRule(risk_id=risk_id, file_pattern=None)
+        rule = SuppressionRule(risk_id=risk_id, file_pattern=None, reason="test")
 
         result = apply_config_suppressions([finding], [rule])
 
