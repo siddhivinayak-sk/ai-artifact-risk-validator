@@ -149,7 +149,7 @@ class TestAggregatorSuppression:
     def test_matching_risk_id_with_matching_file_pattern_suppresses(self) -> None:
         aggregator = Aggregator()
         finding = _make_finding(risk_id="P-S1", artifact_path="prompts/test.prompt.md")
-        rule = SuppressionRule(risk_id="P-S1", file_pattern="prompts/*.md")
+        rule = SuppressionRule(risk_id="P-S1", file_pattern="prompts/*.md", reason="test")
         result = aggregator.aggregate([finding], suppression_rules=[rule])
         assert len(result) == 1
         assert result[0].false_positive is True
@@ -157,7 +157,7 @@ class TestAggregatorSuppression:
     def test_matching_risk_id_with_non_matching_file_pattern_does_not_suppress(self) -> None:
         aggregator = Aggregator()
         finding = _make_finding(risk_id="P-S1", artifact_path="skills/test.md")
-        rule = SuppressionRule(risk_id="P-S1", file_pattern="prompts/*.md")
+        rule = SuppressionRule(risk_id="P-S1", file_pattern="prompts/*.md", reason="test")
         result = aggregator.aggregate([finding], suppression_rules=[rule])
         assert len(result) == 1
         assert result[0].false_positive is False
@@ -165,7 +165,7 @@ class TestAggregatorSuppression:
     def test_non_matching_risk_id_does_not_suppress(self) -> None:
         aggregator = Aggregator()
         finding = _make_finding(risk_id="P-S1")
-        rule = SuppressionRule(risk_id="P-S2")
+        rule = SuppressionRule(risk_id="P-S2", reason="test")
         result = aggregator.aggregate([finding], suppression_rules=[rule])
         assert len(result) == 1
         assert result[0].false_positive is False
@@ -174,10 +174,12 @@ class TestAggregatorSuppression:
         """Test glob-style wildcard patterns via fnmatch."""
         aggregator = Aggregator()
         finding = _make_finding(risk_id="P-S1", artifact_path="src/prompts/deep/nested/file.md")
-        _rule_no_match = SuppressionRule(risk_id="P-S1", file_pattern="src/prompts/**/file.md")
+        _rule_no_match = SuppressionRule(
+            risk_id="P-S1", file_pattern="src/prompts/**/file.md", reason="test"
+        )
         # fnmatch doesn't support **, so this won't match with fnmatch
         # Use a simpler glob pattern
-        rule2 = SuppressionRule(risk_id="P-S1", file_pattern="*file.md")
+        rule2 = SuppressionRule(risk_id="P-S1", file_pattern="*file.md", reason="test")
         result = aggregator.aggregate([finding], suppression_rules=[rule2])
         assert len(result) == 1
         assert result[0].false_positive is True
@@ -186,7 +188,7 @@ class TestAggregatorSuppression:
         """Suppressed finding retains all fields except false_positive."""
         aggregator = Aggregator()
         finding = _make_finding(risk_id="P-S1", confidence=0.85)
-        rule = SuppressionRule(risk_id="P-S1")
+        rule = SuppressionRule(risk_id="P-S1", reason="test")
         result = aggregator.aggregate([finding], suppression_rules=[rule])
         assert result[0].false_positive is True
         assert result[0].id == "P-S1"
@@ -211,7 +213,7 @@ class TestAggregatorSuppression:
             _make_finding(risk_id="P-S1", confidence=0.7),
             _make_finding(risk_id="P-S1", confidence=0.9),
         ]
-        rule = SuppressionRule(risk_id="P-S1")
+        rule = SuppressionRule(risk_id="P-S1", reason="test")
         result = aggregator.aggregate(findings, suppression_rules=[rule])
         # After dedup, only highest confidence remains; then it gets suppressed
         assert len(result) == 1

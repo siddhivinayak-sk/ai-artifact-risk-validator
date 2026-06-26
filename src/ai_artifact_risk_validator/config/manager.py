@@ -270,7 +270,7 @@ def _config_dict_to_validator_config(data: dict[str, Any]) -> dict[str, Any]:
                         SuppressionRule(
                             risk_id=item["risk_id"],
                             file_pattern=item.get("file_pattern"),
-                            reason=item.get("reason"),
+                            reason=item.get("reason", "Suppressed by configuration"),
                         )
                     )
                 elif isinstance(item, SuppressionRule):

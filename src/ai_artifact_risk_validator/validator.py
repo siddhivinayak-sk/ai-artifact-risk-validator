@@ -235,6 +235,7 @@ class Validator:
             artifact_path=str(original_path),
             artifact_type=artifact_type,
             has_executable_scripts=detect_executable_scripts([str(f) for f in files]),
+            gate_overrides=self._config.gate_overrides or None,
         )
 
         logger.info(

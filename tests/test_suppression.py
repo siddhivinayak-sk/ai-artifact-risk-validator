@@ -211,31 +211,31 @@ class TestApplyConfigSuppressions:
 
     def test_matching_risk_id_no_file_pattern_suppresses(self) -> None:
         finding = _make_finding(risk_id="P-S1")
-        rules = [SuppressionRule(risk_id="P-S1")]
+        rules = [SuppressionRule(risk_id="P-S1", reason="test")]
         result = apply_config_suppressions([finding], rules)
         assert result[0].false_positive is True
 
     def test_matching_risk_id_with_matching_file_pattern(self) -> None:
         finding = _make_finding(risk_id="P-S1", artifact_path="prompts/test.prompt.md")
-        rules = [SuppressionRule(risk_id="P-S1", file_pattern="prompts/*.md")]
+        rules = [SuppressionRule(risk_id="P-S1", file_pattern="prompts/*.md", reason="test")]
         result = apply_config_suppressions([finding], rules)
         assert result[0].false_positive is True
 
     def test_matching_risk_id_with_non_matching_file_pattern(self) -> None:
         finding = _make_finding(risk_id="P-S1", artifact_path="skills/test.md")
-        rules = [SuppressionRule(risk_id="P-S1", file_pattern="prompts/*.md")]
+        rules = [SuppressionRule(risk_id="P-S1", file_pattern="prompts/*.md", reason="test")]
         result = apply_config_suppressions([finding], rules)
         assert result[0].false_positive is False
 
     def test_non_matching_risk_id(self) -> None:
         finding = _make_finding(risk_id="P-S1")
-        rules = [SuppressionRule(risk_id="P-S2")]
+        rules = [SuppressionRule(risk_id="P-S2", reason="test")]
         result = apply_config_suppressions([finding], rules)
         assert result[0].false_positive is False
 
     def test_wildcard_file_pattern(self) -> None:
         finding = _make_finding(risk_id="P-S1", artifact_path="prompts/deep/file.md")
-        rules = [SuppressionRule(risk_id="P-S1", file_pattern="*file.md")]
+        rules = [SuppressionRule(risk_id="P-S1", file_pattern="*file.md", reason="test")]
         result = apply_config_suppressions([finding], rules)
         assert result[0].false_positive is True
 
@@ -253,7 +253,7 @@ class TestApplyConfigSuppressions:
             _make_finding(risk_id="P-S1", artifact_path="prompts/a.md"),
             _make_finding(risk_id="P-S2", artifact_path="prompts/b.md"),
         ]
-        rules = [SuppressionRule(risk_id="P-S1")]
+        rules = [SuppressionRule(risk_id="P-S1", reason="test")]
         result = apply_config_suppressions(findings, rules)
         assert result[0].false_positive is True
         assert result[1].false_positive is False

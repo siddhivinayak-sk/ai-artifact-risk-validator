@@ -19,11 +19,17 @@ class SuppressionRule(BaseModel):
 
     A suppression rule identifies a risk ID (and optionally a file pattern)
     that should be marked as a false positive in the scan report.
+
+    Fields:
+        risk_id: The risk ID to suppress (required, e.g. "SK-S7").
+        reason: Explanation for why this suppression exists (required).
+        file_pattern: Optional glob pattern to limit suppression to specific files.
+            If not provided, the rule applies to ALL files matching the risk_id.
     """
 
     risk_id: str
     file_pattern: str | None = None
-    reason: str | None = None
+    reason: str
 
 
 class SemanticConfig(BaseModel):
