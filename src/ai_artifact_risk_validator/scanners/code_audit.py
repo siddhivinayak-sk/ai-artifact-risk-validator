@@ -1232,13 +1232,41 @@ class CodeAuditScanner(BaseScanner):
         # Phase 2 FP reduction: Detect common inline code patterns that are NOT commands
 
         # Type annotations: "str | None", "list[str]", "dict[str, Any]", "Optional[X]"
-        if re.match(
+        # Only match when content contains recognizable Python type indicators
+        # to avoid matching "cmd | cmd" pipe patterns.
+        if "|" in content and re.match(
             r"^[A-Za-z_]\w*(?:\s*\|\s*[A-Za-z_]\w*)*(?:\[.*\])?"
             r"(?:\s*\|\s*[A-Za-z_]\w*(?:\[.*\])?)*"
             r"(?:\s*=\s*\S+)?$",
             content,
         ):
-            return True
+            # Require at least one known type keyword or capitalized word (not just lowercase words)
+            _TYPE_KEYWORDS = {
+                "str",
+                "int",
+                "float",
+                "bool",
+                "bytes",
+                "None",
+                "Any",
+                "list",
+                "dict",
+                "tuple",
+                "set",
+                "Optional",
+                "Union",
+                "Path",
+                "Callable",
+                "Literal",
+                "Sequence",
+                "Mapping",
+            }
+            words = re.findall(r"[A-Za-z_]\w*", content)
+            has_type_indicator = any(
+                w in _TYPE_KEYWORDS or w[0].isupper() or "[" in content for w in words
+            )
+            if has_type_indicator:
+                return True
 
         # Variable declarations / assignments: "spec_name: str | None = None"
         if re.match(r"^[A-Za-z_]\w*\s*:\s*\S", content):
