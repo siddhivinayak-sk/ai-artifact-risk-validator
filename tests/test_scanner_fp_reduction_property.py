@@ -643,7 +643,6 @@ _DESTRUCTIVE_KEYWORDS = [
     "rm -rf",
     "rmdir",
     "deltree",
-    "format",
 ]
 
 # Destructive operation risk IDs by artifact type
