@@ -534,3 +534,229 @@ class TestBackwardCompatibilityJSTS:
         content = "const api = 'http://api.external.com/data';\n"
         findings = code_audit.scan(content, ArtifactType.PLUGIN, "plugin.js")
         assert any(f.id == "PL-S9" for f in findings)
+
+
+# ===========================================================================
+# 10. CodeAudit: AST compile() FP reduction (Phase 3)
+# ===========================================================================
+
+
+class TestASTCompileFPReduction:
+    """Tests that re.compile() in .py files no longer triggers as dangerous."""
+
+    def test_re_compile_not_flagged_in_py(self, code_audit: CodeAuditScanner) -> None:
+        """re.compile() in Python is NOT flagged as dangerous."""
+        content = "import re\npattern = re.compile(r'\\d+')\n"
+        findings = code_audit.scan(content, ArtifactType.SKILL, "util.py")
+        compile_findings = [f for f in findings if f.evidence == "compile"]
+        assert len(compile_findings) == 0
+
+    def test_regex_compile_not_flagged(self, code_audit: CodeAuditScanner) -> None:
+        """regex.compile() is NOT flagged as dangerous."""
+        content = "import regex\np = regex.compile(r'test')\n"
+        findings = code_audit.scan(content, ArtifactType.SKILL, "util.py")
+        compile_findings = [f for f in findings if f.evidence == "compile"]
+        assert len(compile_findings) == 0
+
+    def test_bare_compile_still_flagged(self, code_audit: CodeAuditScanner) -> None:
+        """Standalone compile(source, ...) IS still flagged."""
+        content = "code = compile(source, '<string>', 'exec')\n"
+        findings = code_audit.scan(content, ArtifactType.SKILL, "danger.py")
+        compile_findings = [f for f in findings if f.evidence == "compile"]
+        assert len(compile_findings) >= 1
+
+
+# ===========================================================================
+# 11. CodeAudit: Path traversal FP reduction (Phase 3)
+# ===========================================================================
+
+
+class TestPathTraversalFPReduction:
+    """Tests for reduced path traversal false positives."""
+
+    def test_pathlib_path_input_dir_not_flagged(self, code_audit: CodeAuditScanner) -> None:
+        """Path(input_dir) using pathlib is NOT flagged as path traversal."""
+        content = "from pathlib import Path\nresult = Path(input_dir)\n"
+        findings = code_audit.scan(content, ArtifactType.SKILL, "util.py")
+        path_findings = [f for f in findings if "Path(input" in f.evidence]
+        assert len(path_findings) == 0
+
+    def test_open_self_file_not_flagged(self, code_audit: CodeAuditScanner) -> None:
+        """open(self.filepath) is NOT flagged as path traversal."""
+        content = "with open(self.output_path, 'w') as f:\n    f.write(data)\n"
+        findings = code_audit.scan(content, ArtifactType.SKILL, "writer.py")
+        open_findings = [f for f in findings if "open(self" in f.evidence]
+        assert len(open_findings) == 0
+
+    def test_open_fstring_still_flagged(self, code_audit: CodeAuditScanner) -> None:
+        """open(f'{user_dir}/secret') IS still flagged."""
+        content = "data = open(f'{user_dir}/config')\n"
+        # Use non-python extension to trigger regex path
+        findings = code_audit.scan(content, ArtifactType.PLUGIN, "plugin.ts")
+        path_findings = [f for f in findings if "path traversal" in f.description.lower()]
+        assert len(path_findings) >= 1
+
+    def test_dot_dot_traversal_still_flagged(self, code_audit: CodeAuditScanner) -> None:
+        """../ path traversal is still detected."""
+        content = "const path = base + '/../../../etc/passwd';\n"
+        findings = code_audit.scan(content, ArtifactType.MCP, "server.ts")
+        assert any(f.id == "MCP-S9" for f in findings)
+
+
+# ===========================================================================
+# 12. CodeAudit: Insecure HTTP FP reduction (Phase 3)
+# ===========================================================================
+
+
+class TestInsecureHTTPFPReduction:
+    """Tests for exclusion of schema/namespace URLs."""
+
+    def test_xml_schema_url_not_flagged(self, code_audit: CodeAuditScanner) -> None:
+        """XML schema namespace URL is NOT flagged as insecure HTTP."""
+        content = (
+            'NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"\n'
+        )
+        findings = code_audit.scan(content, ArtifactType.PLUGIN, "docx.ts")
+        http_findings = [f for f in findings if "insecure" in f.description.lower()]
+        assert len(http_findings) == 0
+
+    def test_w3c_url_not_flagged(self, code_audit: CodeAuditScanner) -> None:
+        """W3C namespace URL is NOT flagged."""
+        content = 'xmlns = "http://www.w3.org/1999/xhtml"\n'
+        findings = code_audit.scan(content, ArtifactType.PLUGIN, "xml.ts")
+        http_findings = [f for f in findings if "insecure" in f.description.lower()]
+        assert len(http_findings) == 0
+
+    def test_real_insecure_http_still_flagged(self, code_audit: CodeAuditScanner) -> None:
+        """Real insecure HTTP URLs are still flagged."""
+        content = "const api = 'http://api.external.com/data';\n"
+        findings = code_audit.scan(content, ArtifactType.PLUGIN, "plugin.js")
+        assert any(f.id == "PL-S9" for f in findings)
+
+
+# ===========================================================================
+# 13. CodeAudit: "format" removed from destructive keywords (Phase 3)
+# ===========================================================================
+
+
+class TestFormatKeywordRemoval:
+    """Tests that 'format' no longer triggers as a destructive keyword."""
+
+    def test_format_in_code_block_not_flagged(self, code_audit: CodeAuditScanner) -> None:
+        """'format' inside a fenced code block does NOT produce a destructive finding."""
+        content = '```python\nresult = "{0}".format(value)\n```\n'
+        findings = code_audit.scan(content, ArtifactType.SKILL, "example.md")
+        format_findings = [
+            f
+            for f in findings
+            if f.evidence.strip() == "format" and "destructive" in f.description.lower()
+        ]
+        assert len(format_findings) == 0
+
+    def test_format_in_prose_not_flagged(self, code_audit: CodeAuditScanner) -> None:
+        """'format' in prose does NOT produce a destructive finding."""
+        content = "The output format is JSON.\n"
+        findings = code_audit.scan(content, ArtifactType.SKILL, "guide.md")
+        format_findings = [
+            f for f in findings if "format" in f.evidence and "destructive" in f.description.lower()
+        ]
+        assert len(format_findings) == 0
+
+    def test_rm_rf_still_detected_as_destructive(self, code_audit: CodeAuditScanner) -> None:
+        """rm -rf is still detected as destructive."""
+        content = "```bash\nrm -rf /tmp/build\n```\n"
+        findings = code_audit.scan(content, ArtifactType.SKILL, "cleanup.md")
+        rm_findings = [f for f in findings if "rm" in f.evidence.lower()]
+        assert len(rm_findings) >= 1
+
+
+# ===========================================================================
+# 14. CodeAudit: Enhanced inline code span detection (Phase 3)
+# ===========================================================================
+
+
+class TestInlineCodeSpanPhase3:
+    """Additional tests for _is_inline_code_span enhancements."""
+
+    def test_comparison_expression_recognized(self, code_audit: CodeAuditScanner) -> None:
+        """Comparison expressions like 'ac_start <= ac_end' are inline code."""
+        assert code_audit._is_inline_code_span("ac_start <= ac_end") is True
+        assert code_audit._is_inline_code_span("x >= 0") is True
+        assert code_audit._is_inline_code_span("a == b") is True
+
+    def test_html_tag_recognized(self, code_audit: CodeAuditScanner) -> None:
+        """HTML tags are inline code."""
+        assert code_audit._is_inline_code_span('<a href="url">text</a>') is True
+        assert code_audit._is_inline_code_span('<meta charset="UTF-8">') is True
+        assert code_audit._is_inline_code_span("<!DOCTYPE html>") is True
+        assert code_audit._is_inline_code_span('<nav class="toc">') is True
+
+    def test_blockquote_marker_recognized(self, code_audit: CodeAuditScanner) -> None:
+        """Markdown blockquote markers are inline code."""
+        assert code_audit._is_inline_code_span("> ⚠️ **DEPRECATED**") is True
+        assert code_audit._is_inline_code_span("> NOTE: this is important") is True
+
+    def test_json_literal_recognized(self, code_audit: CodeAuditScanner) -> None:
+        """JSON object literals are inline code."""
+        assert (
+            code_audit._is_inline_code_span('{ "channel": "kiro-ide|kiro-cli", "name": "string" }')
+            is True
+        )
+
+    def test_jira_pattern_recognized(self, code_audit: CodeAuditScanner) -> None:
+        """Jira ticket patterns are inline code."""
+        assert code_audit._is_inline_code_span("[JIRA-123] Fix: <summary>") is True
+
+    def test_html_comment_recognized(self, code_audit: CodeAuditScanner) -> None:
+        """HTML comments are inline code."""
+        assert code_audit._is_inline_code_span("<!-- ... -->") is True
+
+    def test_bare_less_than_recognized(self, code_audit: CodeAuditScanner) -> None:
+        """Bare '<' is treated as shell redirection (ambiguous, stays as finding)."""
+        # A single '<' character is ambiguous — it could be shell input redirection
+        # so the scanner conservatively flags it. This is acceptable.
+        assert code_audit._is_inline_code_span("<") is False
+
+    def test_pipe_command_still_detected(self, code_audit: CodeAuditScanner) -> None:
+        """'| sh' pipe command is NOT inline code."""
+        assert code_audit._is_inline_code_span("| sh") is False
+
+
+# ===========================================================================
+# 15. ComplianceAudit: REG-1 "global" exclusion (Phase 3)
+# ===========================================================================
+
+
+class TestComplianceAuditGlobalExclusion:
+    """Tests for REG-1 not triggering on standalone 'global' keyword."""
+
+    def test_global_in_non_cloud_context_not_flagged(self, perm_audit: PermAuditScanner) -> None:
+        """'global' in documentation without region suffix is not a compliance issue."""
+        # This test uses ComplianceAudit directly
+        from ai_artifact_risk_validator.scanners.compliance_audit import ComplianceAuditScanner
+
+        scanner = ComplianceAuditScanner()
+        content = "This is a global configuration that deploys to all environments.\n"
+        findings = scanner.scan(content, ArtifactType.SOP, "config.md")
+        reg1_findings = [f for f in findings if f.id == "REG-1"]
+        assert len(reg1_findings) == 0
+
+    def test_global_east_region_still_flagged(self, perm_audit: PermAuditScanner) -> None:
+        """'global-east' (region suffix) IS still flagged as a cloud region."""
+        from ai_artifact_risk_validator.scanners.compliance_audit import ComplianceAuditScanner
+
+        scanner = ComplianceAuditScanner()
+        content = "Deploy the service to global-east region for data replication.\n"
+        findings = scanner.scan(content, ArtifactType.SOP, "deploy.md")
+        reg1_findings = [f for f in findings if f.id == "REG-1"]
+        assert len(reg1_findings) >= 1
+
+    def test_eu_west_1_still_flagged(self, perm_audit: PermAuditScanner) -> None:
+        """Specific cloud regions like eu-west-1 are still flagged."""
+        from ai_artifact_risk_validator.scanners.compliance_audit import ComplianceAuditScanner
+
+        scanner = ComplianceAuditScanner()
+        content = "The data is stored in eu-west-1 for replication.\n"
+        findings = scanner.scan(content, ArtifactType.SOP, "infra.md")
+        reg1_findings = [f for f in findings if f.id == "REG-1"]
+        assert len(reg1_findings) >= 1

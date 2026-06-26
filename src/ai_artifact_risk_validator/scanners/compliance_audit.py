@@ -885,6 +885,36 @@ class ComplianceAuditScanner(BaseScanner):
                 if _is_pronoun_us(content, match_start):
                     return findings
 
+            # Phase 3 check: standalone "global"/"Global" exclusion
+            # "global" is too ambiguous — commonly used for "global variable",
+            # "global state", "global configuration". Only flag if followed by
+            # a region suffix (e.g., "global-east") or preceded by cloud context.
+            if matched_keyword.lower() == "global":
+                # Check if it's followed by a region suffix
+                after_pos = match_start + len(matched_keyword)
+                after_text = content[after_pos : after_pos + 10]
+                if not after_text.startswith(("-", "_")):
+                    # No region suffix → likely generic use, skip
+                    logger.debug(
+                        "global_keyword_ambiguous_exclusion",
+                        keyword=matched_keyword,
+                        position=match_start,
+                    )
+                    return findings
+
+            # Phase 3 check: standalone "EU" exclusion when not in cloud context
+            # "EU" commonly appears in compliance docs discussing regulations
+            # (GDPR, EU AI Act) rather than cloud regions.
+            if matched_keyword == "EU":
+                match_line_idx_eu = content[:match_start].count("\n")
+                line_text = lines[match_line_idx_eu] if match_line_idx_eu < len(lines) else ""
+                # If the line mentions regulations/compliance, skip
+                if re.search(
+                    r"(?i)\b(?:GDPR|regulation|directive|compliance|AI\s*Act|law)\b",
+                    line_text,
+                ):
+                    return findings
+
             # Determine the 0-based line index for the match
             match_line_idx = content[:match_start].count("\n")
 
