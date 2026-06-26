@@ -383,10 +383,12 @@ _RE_SSRF_PATTERNS = re.compile(
 )
 
 # Path traversal patterns
+# Tightened to reduce FPs: Path() only flags with explicitly user-sourced variable names,
+# open() only flags with f-strings or concatenation (not self.attribute access)
 _RE_PATH_TRAVERSAL = re.compile(
-    r"(\.\./|\.\.\\|os\.path\.join\s*\(\s*[^)]*\b(user|input|param|arg|request)"
-    r"|Path\s*\(\s*[^)]*\b(user|input|param|arg|request)"
-    r"|open\s*\(\s*(f['\"]|[a-zA-Z_]\w*\s*[\+\.]))",
+    r"(\.\./|\.\.\\|os\.path\.join\s*\(\s*[^)]*\b(user_input|user_path|request_path|param|arg)"
+    r"|Path\s*\(\s*[^)]*\b(user_input|user_path|request_path|untrusted)"
+    r"|open\s*\(\s*(f['\"]|[a-zA-Z_]\w*\s*\+))",
 )
 
 # Unsafe deserialization patterns
@@ -414,7 +416,10 @@ _RE_DYNAMIC_IMPORTS = re.compile(
 )
 
 # Insecure HTTP patterns
-_RE_INSECURE_HTTP = re.compile(r"(http://(?!localhost|127\.0\.0\.1|0\.0\.0\.0)[^\s'\"]+)")
+# Excludes localhost, loopback, and XML/schema namespace URLs (not real network calls)
+_RE_INSECURE_HTTP = re.compile(
+    r"(http://(?!localhost|127\.0\.0\.1|0\.0\.0\.0|schemas\.|www\.w3\.org/|xml\.org/)[^\s'\"]+)"
+)
 
 # Privilege escalation patterns
 _RE_PRIVILEGE_ESCALATION = re.compile(
@@ -459,9 +464,11 @@ _RE_BACKTICK_EXEC = re.compile(
 
 # Destructive keyword pattern — matches common destructive operation keywords
 # Used with _has_code_context() to filter prose occurrences
+# "format" removed: too generic, matches string .format(), logging format=, etc.
+# Disk formatting is already caught by PermAudit's dedicated format regex.
 _RE_DESTRUCTIVE_KEYWORDS = re.compile(
     r"\b(truncate|halt|drop|kill|shutdown|reboot|poweroff"
-    r"|rm\s+-rf|rmdir|deltree|format)\b",
+    r"|rm\s+-rf|rmdir|deltree)\b",
     re.IGNORECASE,
 )
 
@@ -737,9 +744,16 @@ class _ASTDangerousCallVisitor(ast.NodeVisitor):
         return None, None
 
     def _check_dangerous_builtins(self, node: ast.Call) -> None:
-        """Check for dangerous built-in function calls."""
-        _, func_name = self._get_call_name(node)
-        if func_name in _DANGEROUS_BUILTINS:
+        """Check for dangerous built-in function calls.
+
+        Only flags calls where the function is called as a bare builtin
+        (not as a method on a module). This avoids false positives on
+        re.compile(), Path.compile(), etc.
+        """
+        module, func_name = self._get_call_name(node)
+        # Only flag unqualified calls (module is None) — e.g., compile(source)
+        # Skip qualified calls like re.compile(), regex.compile()
+        if func_name in _DANGEROUS_BUILTINS and module is None:
             self.dangerous_calls.append(
                 (node.lineno, func_name, f"Dangerous function call: {func_name}()")
             )
@@ -1234,6 +1248,30 @@ class CodeAuditScanner(BaseScanner):
         # "<spec-name>", "str | None". Angle brackets used as placeholders are
         # NOT shell redirection operators.
         if re.search(r"<[A-Za-z_]\w*(?:[-_]\w+)*>", content):
+            return True
+
+        # Comparison expressions: "ac_start <= ac_end", "x >= y", "a == b"
+        if re.search(r"(?:<=|>=|==|!=|<>)", content):
+            return True
+
+        # HTML tags in backticks: "<a href=...>", "<meta charset=...>", "<!DOCTYPE"
+        if re.match(r"^<[!/?]?\w", content):
+            return True
+
+        # Markdown blockquote in backtick: "> ⚠️ ...", "> NOTE: ..."
+        if content.startswith(">") and (len(content) < 3 or content[1] == " "):
+            return True
+
+        # JSON/object literal: starts with { and contains quotes/colons
+        if content.startswith("{") and (":" in content or '"' in content):
+            return True
+
+        # Jira/commit message pattern: "[JIRA-123] Fix: ..."
+        if re.match(r"^\[[\w-]+\]", content):
+            return True
+
+        # HTML comment: "<!-- ... -->"
+        if content.startswith("<!--"):
             return True
 
         # Path-like templates: "src/sops/", ".kiro/steering/", "--channel kiro-ide"
